@@ -36,7 +36,7 @@ interface DataContextType {
   setTmdbToken: (token: string) => Promise<void>;
   login: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
-  register: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
+  register: (email: string, name: string, password: string) => Promise<{ success: boolean; message: string }>;
   approveUser: (userId: string) => void;
   rejectUser: (userId: string) => void;
   setView: (view: ViewState, movieId?: string) => void;

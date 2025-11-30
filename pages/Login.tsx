@@ -36,8 +36,7 @@ const Login: React.FC = () => {
                 setLoading(false);
                 return;
             }
-            // cast to any because we updated register in context but type might linger
-            const result = await (register as any)(email, name, password);
+            const result = await register(email, name, password);
             setMessage({ type: result.success ? 'success' : 'error', text: result.message });
             if (result.success && !result.message.includes('Administrador')) {
                 // Stay on screen to show "Pending approval" message
