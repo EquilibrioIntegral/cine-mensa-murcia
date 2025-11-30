@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 // This component is currently unused as Forum feature was requested to be removed.

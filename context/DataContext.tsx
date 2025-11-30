@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage } from '../types';
 import { auth, db } from '../firebase';

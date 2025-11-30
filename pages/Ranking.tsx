@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import { Trophy, Users, Star, ThumbsUp, Medal } from 'lucide-react';

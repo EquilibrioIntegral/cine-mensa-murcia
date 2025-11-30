@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { X, Check, EyeOff } from 'lucide-react';
 import { DetailedRating } from '../types';

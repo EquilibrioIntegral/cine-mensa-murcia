@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { generateSecurityQuiz, validateSecurityQuiz } from '../services/geminiService';
 import { Loader2, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';

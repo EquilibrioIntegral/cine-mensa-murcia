@@ -1,5 +1,3 @@
-
-
 export interface Movie {
   id: string; // Internal ID
   tmdbId?: number; // TMDB ID

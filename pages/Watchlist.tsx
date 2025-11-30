@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import MovieCard from '../components/MovieCard';
 import { ListVideo } from 'lucide-react';

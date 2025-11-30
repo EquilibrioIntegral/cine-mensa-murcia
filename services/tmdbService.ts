@@ -1,5 +1,3 @@
-
-
 // Service to interact with TMDB API
 
 const BASE_URL = 'https://api.themoviedb.org/3';
