@@ -9,7 +9,6 @@ const __dirname = path.dirname(__filename)
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   // Carga las variables de entorno desde .env o el sistema (Vercel)
-  // El tercer argumento '' permite cargar variables que no empiecen por VITE_
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
@@ -21,8 +20,9 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       // Reemplaza process.env.API_KEY por el valor real durante la construcción
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      // Evita errores si se accede a otras propiedades de process.env de forma segura
+      // Si env.API_KEY no existe (dev sin .env), usa string vacío para evitar crash
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || ""),
+      // Importante: Definir process.env vacío para compatibilidad con librerías node
       'process.env': {} 
     }
   }

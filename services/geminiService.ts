@@ -1,10 +1,15 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
 
-// Initialize the client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize the client safely
+const apiKey = process.env.API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
+
+// Helper to check if API is usable
+const isAiAvailable = () => {
+    return !!apiKey && apiKey.length > 0;
+};
 
 // --- CINEFORUM EVENT GENERATOR ---
 
@@ -13,6 +18,11 @@ export const generateCineforumEvent = async (
     tmdbToken: string
 ): Promise<Partial<CineEvent> | null> => {
     
+    if (!isAiAvailable()) {
+        console.error("Gemini API Key missing");
+        return null;
+    }
+
     // Create a list of watched titles to exclude
     const excludeList = watchedMovies.map(m => m.title).join(', ');
 
@@ -137,6 +147,8 @@ export const personalizeCandidateReason = async (
     watchedMovies: Movie[]
 ): Promise<string> => {
     
+    if (!isAiAvailable()) return genericReason;
+
     // Create context string from user ratings
     const tastes = userRatings.slice(0, 15).map(r => {
         const m = watchedMovies.find(mv => mv.id === r.movieId);
@@ -177,6 +189,8 @@ export const getModeratorResponse = async (
     movieTitle: string,
     themeTitle: string
 ): Promise<string> => {
+    if (!isAiAvailable()) return "¡Qué debate tan interesante!";
+
     const context = chatHistory.slice(-10).map(m => `${m.userName}: ${m.text}`).join('\n');
     
     const prompt = `
@@ -211,6 +225,8 @@ export const getWelcomeMessage = async (
     movieTitle: string,
     themeTitle: string
 ): Promise<string> => {
+    if (!isAiAvailable()) return "¡Bienvenidos al debate! La sala está abierta.";
+
     const prompt = `
         Eres la PRESENTADORA del programa de TV "Cine Mensa".
         Hoy comienza el debate sobre la película ganadora: "${movieTitle}" (Del ciclo: ${themeTitle}).
@@ -246,6 +262,8 @@ export const getParticipantGreeting = async (
     userMessage: string,
     movieTitle: string
 ): Promise<string> => {
+    if (!isAiAvailable()) return `¡Bienvenido ${userName}!`;
+
     const prompt = `
         Eres la PRESENTADORA del programa. El usuario "${userName}" acaba de entrar al chat y ha dicho: "${userMessage}".
         La película es "${movieTitle}".
@@ -279,6 +297,10 @@ export const getMovieRecommendations = async (
   tmdbToken: string
 ): Promise<Movie[]> => {
   
+  if (!isAiAvailable()) {
+      throw new Error("API Key de IA no configurada");
+  }
+
   if (watchedMovies.length === 0 && userRatings.length === 0) {
     return [];
   }
@@ -409,6 +431,10 @@ export const sendChatToGemini = async (
     tmdbToken: string
 ): Promise<{ text: string, movies: Movie[] }> => {
     
+    if (!isAiAvailable()) {
+        return { text: "El sistema de IA está offline (Falta API Key).", movies: [] };
+    }
+
     // 1. Build Context string
     const ratingsContext = userRatings.map(r => {
         const movie = watchedMovies.find(m => m.id === r.movieId);
@@ -512,6 +538,17 @@ export const generateSecurityQuiz = async (
     movieTitle: string
 ): Promise<{ question: string }[]> => {
     
+    if (!isAiAvailable()) {
+        // Fallback static quiz if AI is offline
+        return [
+            { question: "¿Cómo termina la película?" },
+            { question: "¿Cuál es el conflicto principal?" },
+            { question: "Nombra un personaje memorable." },
+            { question: "¿Cuál es la escena más impactante?" },
+            { question: "Resume la trama brevemente." }
+        ];
+    }
+
     const prompt = `
         Genera un examen de seguridad para verificar si un usuario ha visto la película: "${movieTitle}".
         
@@ -554,6 +591,10 @@ export const validateSecurityQuiz = async (
     qa: { question: string, answer: string }[]
 ): Promise<{ passed: boolean, reason: string }> => {
     
+    if (!isAiAvailable()) {
+        return { passed: true, reason: "Sistema IA offline. Validación automática." };
+    }
+
     const context = qa.map(i => `P: ${i.question}\nR: ${i.answer}`).join('\n\n');
 
     const prompt = `
