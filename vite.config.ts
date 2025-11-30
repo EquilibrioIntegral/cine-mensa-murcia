@@ -15,7 +15,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "./src"),
+        // Apuntar @ a la raíz (.) en lugar de ./src porque los archivos están en la raíz
+        "@": path.resolve(__dirname, "./"),
       },
     },
     define: {
