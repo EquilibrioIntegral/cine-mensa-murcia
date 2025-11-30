@@ -1,0 +1,7 @@
+{
+  "name": "Cine Mensa Murcia",
+  "description": "Una plataforma exclusiva para el club de cine Cine Mensa Murcia. Gestiona rankings, foros de discusión y recibe recomendaciones de películas personalizadas impulsadas por Gemini AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
