@@ -1,3 +1,4 @@
+
 export interface Movie {
   id: string; // Internal ID
   tmdbId?: number; // TMDB ID
@@ -52,13 +53,15 @@ export interface UserRating {
 export enum ViewState {
   LOGIN,
   REGISTER, 
-  DASHBOARD,
+  NEWS, // New Home
+  DASHBOARD, // Catalog
   RANKING,
   WATCHLIST,
   RECOMMENDATIONS,
   ADMIN_PANEL,
   MOVIE_DETAILS,
-  EVENTS // New View
+  EVENTS,
+  FEEDBACK // New Feedback View
 }
 
 // --- NEW EVENT TYPES ---
@@ -105,4 +108,25 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   relatedMovies?: Movie[];
+}
+
+// --- NEWS & FEEDBACK TYPES ---
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  content: string;
+  type: 'general' | 'update' | 'event';
+  timestamp: number;
+}
+
+export interface AppFeedback {
+  id: string;
+  userId: string;
+  userName: string;
+  type: 'bug' | 'feature';
+  text: string;
+  status: 'pending' | 'solved';
+  timestamp: number;
+  adminResponse?: string;
 }

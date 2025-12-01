@@ -1,7 +1,8 @@
+
 import React from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search } from 'lucide-react';
+import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug } from 'lucide-react';
 
 const Navbar: React.FC = () => {
   const { user, setView, currentView, logout } = useData();
@@ -25,7 +26,7 @@ const Navbar: React.FC = () => {
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div 
             className="flex items-center gap-2 cursor-pointer"
-            onClick={() => setView(ViewState.DASHBOARD)}
+            onClick={() => setView(ViewState.NEWS)}
         >
           <Film className="text-cine-gold" size={28} />
           <h1 className="text-xl font-bold tracking-wider text-white hidden md:block">CINE MENSA<span className="text-cine-gold">MURCIA</span></h1>
@@ -33,7 +34,8 @@ const Navbar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <NavItem view={ViewState.DASHBOARD} icon={Film} label="Inicio" />
+            <NavItem view={ViewState.NEWS} icon={Home} label="Noticias" />
+            <NavItem view={ViewState.DASHBOARD} icon={Film} label="Catálogo" />
             <NavItem view={ViewState.EVENTS} icon={Ticket} label="Eventos" />
             <NavItem view={ViewState.RANKING} icon={Trophy} label="Ranking" />
             <NavItem view={ViewState.WATCHLIST} icon={ListVideo} label="Lista" />
@@ -54,7 +56,14 @@ const Navbar: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4">
-            {/* Search Icon Quick Access */}
+            <button 
+                onClick={() => setView(ViewState.FEEDBACK)}
+                className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
+                title="Reportar Bug o Mejora"
+            >
+                <Bug size={20} />
+            </button>
+
             <button 
                 onClick={() => setView(ViewState.DASHBOARD)}
                 className="p-2 text-gray-400 hover:text-cine-gold transition-colors"

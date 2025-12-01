@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Movie, ViewState } from '../types';
 import StarRating from './StarRating';
@@ -10,17 +11,29 @@ interface MovieCardProps {
 }
 
 const MovieCard: React.FC<MovieCardProps> = ({ movie, showRatingInput = false }) => {
-  const { user, toggleWatchlist, setView, userRatings } = useData();
+  const { user, toggleWatchlist, setView, userRatings, addMovie, movies } = useData();
   
   const inWatchlist = user?.watchlist.includes(movie.id);
   const userRating = userRatings.find(r => r.movieId === movie.id && r.userId === user?.id);
   const isRecommendation = !!movie.recommendationReason;
 
   const handleCardClick = () => {
-      // Navigate to details via ViewState. 
-      // If it's a raw recommendation (tmdb-id), the detail page handles it.
+      // Check if movie needs to be added to DB first (AI recommendations are often temporary objects)
+      // We do this check silently in the detail view logic usually, but to be safe:
       setView(ViewState.MOVIE_DETAILS, movie.id);
   };
+
+  const handleBookmark = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      
+      // CRITICAL FIX: If it's an AI recommendation, it might not exist in the 'movies' collection yet.
+      // We must check and add it before toggling watchlist, otherwise the ID refers to nothing.
+      if (!movies.find(m => m.id === movie.id)) {
+          await addMovie(movie);
+      }
+      
+      toggleWatchlist(movie.id);
+  }
 
   return (
     <div 
@@ -38,7 +51,7 @@ const MovieCard: React.FC<MovieCardProps> = ({ movie, showRatingInput = false })
         {/* Actions Overlay */}
         <div className="absolute top-2 right-2 flex gap-2">
             <button 
-                onClick={(e) => { e.stopPropagation(); toggleWatchlist(movie.id); }}
+                onClick={handleBookmark}
                 className={`p-2 rounded-full backdrop-blur-md ${inWatchlist ? 'bg-cine-gold text-black' : 'bg-black/50 text-white'} hover:bg-cine-gold hover:text-black transition-colors`}
                 title={inWatchlist ? "Quitar de lista" : "Añadir a lista"}
             >
