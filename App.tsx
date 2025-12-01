@@ -12,6 +12,7 @@ import MovieDetails from './pages/MovieDetails';
 import Events from './pages/Events';
 import News from './pages/News';
 import Feedback from './pages/Feedback';
+import Profile from './pages/Profile';
 import { ViewState } from './types';
 
 const AppContent: React.FC = () => {
@@ -35,6 +36,7 @@ const AppContent: React.FC = () => {
         {currentView === ViewState.MOVIE_DETAILS && <MovieDetails />}
         {currentView === ViewState.EVENTS && <Events />}
         {currentView === ViewState.FEEDBACK && <Feedback />}
+        {currentView === ViewState.PROFILE && <Profile />}
       </main>
 
       <footer className="bg-black py-6 mt-auto border-t border-gray-900">

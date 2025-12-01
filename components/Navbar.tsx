@@ -72,9 +72,9 @@ const Navbar: React.FC = () => {
                 <Search size={22} />
             </button>
 
-            <div className="hidden md:flex items-center gap-3">
-                <span className="text-sm font-medium text-gray-300 max-w-[100px] truncate">{user?.name}</span>
-                <img src={user?.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-700" />
+            <div className="hidden md:flex items-center gap-3 cursor-pointer group" onClick={() => setView(ViewState.PROFILE)}>
+                <span className="text-sm font-medium text-gray-300 max-w-[100px] truncate group-hover:text-cine-gold transition-colors">{user?.name}</span>
+                <img src={user?.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-700 group-hover:border-cine-gold transition-colors object-cover" />
             </div>
             <button 
                 onClick={logout} 

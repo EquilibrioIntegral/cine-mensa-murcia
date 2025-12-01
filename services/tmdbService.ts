@@ -1,3 +1,4 @@
+
 // Service to interact with TMDB API
 
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -40,6 +41,13 @@ export interface TMDBMovieResult {
   release_date: string;
   poster_path: string;
   overview: string;
+}
+
+export interface TMDBPersonResult {
+    id: number;
+    name: string;
+    profile_path: string | null;
+    known_for_department: string;
 }
 
 export interface TMDBVideo {
@@ -105,6 +113,28 @@ export const searchMoviesTMDB = async (query: string, token: string): Promise<TM
     console.error("TMDB Search Exception:", String(error));
     return [];
   }
+};
+
+export const searchPersonTMDB = async (query: string, token: string): Promise<TMDBPersonResult[]> => {
+    if (!query || !token) return [];
+
+    try {
+        const { url, headers } = getAuthHeadersAndUrl('/search/person', token, {
+            query: query,
+            language: 'es-ES',
+            page: '1',
+            include_adult: 'false'
+        });
+
+        const response = await fetch(url, { headers });
+        if (!response.ok) return [];
+
+        const data = await response.json();
+        return data.results || [];
+    } catch (e) {
+        console.error("TMDB Person Search Error:", String(e));
+        return [];
+    }
 };
 
 // New helper for AI Enrichment

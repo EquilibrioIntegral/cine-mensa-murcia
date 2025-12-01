@@ -39,7 +39,8 @@ interface DataContextType {
   setTmdbToken: (token: string) => Promise<void>;
   login: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
-  register: (email: string, name: string, password: string) => Promise<{ success: boolean; message: string }>;
+  register: (email: string, name: string, password: string, avatarUrl?: string) => Promise<{ success: boolean; message: string }>;
+  updateUserProfile: (name: string, avatarUrl: string) => Promise<void>;
   approveUser: (userId: string) => void;
   rejectUser: (userId: string) => void;
   setView: (view: ViewState, movieId?: string) => void;
@@ -255,7 +256,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentView(ViewState.LOGIN);
   };
 
-  const register = async (email: string, name: string, passwordInput: string) => {
+  const register = async (email: string, name: string, passwordInput: string, avatarUrl?: string) => {
     try {
       const isAdmin = isAdminEmail(email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, passwordInput);
@@ -263,7 +264,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: userCredential.user.uid,
         email,
         name,
-        avatarUrl: `https://picsum.photos/seed/${email}/100/100`,
+        avatarUrl: avatarUrl || `https://ui-avatars.com/api/?name=${name}&background=d4af37&color=000`,
         watchedMovies: [],
         watchlist: [],
         status: isAdmin ? 'active' : 'pending',
@@ -277,6 +278,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error.code === 'auth/email-already-in-use') return { success: false, message: "Email ya registrado." };
       return { success: false, message: String(error.message) };
     }
+  };
+
+  const updateUserProfile = async (name: string, avatarUrl: string) => {
+      if (!user) return;
+      try {
+          await updateDoc(doc(db, 'users', user.id), { name, avatarUrl });
+      } catch (e) { console.error(String(e)); }
   };
 
   const approveUser = async (userId: string) => {
@@ -403,10 +411,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           await setDoc(doc(db, 'events', newEvent.id), newEvent);
           
-          // NOTA: Se ha eliminado la creación automática de noticias duplicadas.
-          // La información del evento activo se mostrará directamente en el Dashboard de Noticias
-          // usando los datos del evento (backdropUrl, themeTitle, dates).
-          
       } catch (e) { console.error(String(e)); }
   };
 
@@ -507,7 +511,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <DataContext.Provider value={{
       user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken,
-      setTmdbToken, login, logout, register, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
+      setTmdbToken, login, logout, register, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
       createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage,
       sendFeedback, resolveFeedback, publishNews, deleteFeedback
     }}>

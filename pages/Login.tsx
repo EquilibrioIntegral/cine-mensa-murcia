@@ -1,6 +1,8 @@
+
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Film } from 'lucide-react';
+import AvatarSelector from '../components/AvatarSelector';
 
 const Login: React.FC = () => {
   const { login, register } = useData();
@@ -8,6 +10,7 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [selectedAvatar, setSelectedAvatar] = useState('');
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,7 +38,7 @@ const Login: React.FC = () => {
                 setLoading(false);
                 return;
             }
-            const result = await register(email, name, password);
+            const result = await register(email, name, password, selectedAvatar);
             setMessage({ type: result.success ? 'success' : 'error', text: result.message });
             if (result.success && !result.message.includes('Administrador')) {
                 // Stay on screen to show "Pending approval" message
@@ -57,7 +60,7 @@ const Login: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-[url('https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
       <div className="absolute inset-0 bg-cine-dark/90 backdrop-blur-sm"></div>
       
-      <div className="relative z-10 w-full max-w-md p-8 bg-black/60 border border-gray-800 rounded-2xl shadow-2xl backdrop-blur-md">
+      <div className="relative z-10 w-full max-w-md p-8 bg-black/60 border border-gray-800 rounded-2xl shadow-2xl backdrop-blur-md max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex flex-col items-center mb-8">
             <div className="bg-cine-gold p-3 rounded-full mb-4">
                 <Film size={32} className="text-black" />
@@ -76,6 +79,7 @@ const Login: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
             {isRegistering && (
+                <>
                 <div>
                     <label className="block text-xs text-gray-400 uppercase font-bold mb-1">Nombre</label>
                     <input 
@@ -87,6 +91,12 @@ const Login: React.FC = () => {
                         required={isRegistering}
                     />
                 </div>
+                <div>
+                    <label className="block text-xs text-gray-400 uppercase font-bold mb-2">Elige tu Avatar</label>
+                    <AvatarSelector currentAvatar={selectedAvatar} onSelect={setSelectedAvatar} />
+                    {!selectedAvatar && <p className="text-xs text-yellow-500 mt-1">Selecciona una imagen</p>}
+                </div>
+                </>
             )}
             <div>
                 <label className="block text-xs text-gray-400 uppercase font-bold mb-1">Email</label>
@@ -113,7 +123,7 @@ const Login: React.FC = () => {
 
             <button 
                 type="submit"
-                disabled={loading}
+                disabled={loading || (isRegistering && !selectedAvatar)}
                 className="w-full bg-cine-gold text-black font-bold py-3 rounded hover:bg-white transition-colors mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 {loading ? 'Procesando...' : (isRegistering ? 'Solicitar Registro' : 'Entrar al Cine')}

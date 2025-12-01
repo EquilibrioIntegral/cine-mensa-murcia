@@ -61,7 +61,8 @@ export enum ViewState {
   ADMIN_PANEL,
   MOVIE_DETAILS,
   EVENTS,
-  FEEDBACK // New Feedback View
+  FEEDBACK,
+  PROFILE // New Profile View
 }
 
 // --- NEW EVENT TYPES ---
