@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage } from "../types";
+import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
 
 // Initialize the client safely
@@ -163,7 +163,8 @@ export const generateCinemaNews = async (): Promise<{ title: string, content: st
 // --- CINEFORUM EVENT GENERATOR ---
 
 export const generateCineforumEvent = async (
-    watchedMovies: Movie[],
+    allMovies: Movie[],
+    allUsers: User[],
     tmdbToken: string
 ): Promise<Partial<CineEvent> | null> => {
     
@@ -172,8 +173,13 @@ export const generateCineforumEvent = async (
         return null;
     }
 
-    // Create a list of watched titles to exclude
-    const excludeList = watchedMovies.map(m => m.title).join(', ');
+    // --- LOGIC 70% RULE ---
+    // Calculate exclusion list: Movies seen by > 30% of users (meaning < 70% haven't seen it)
+    const activeUsersCount = allUsers.filter(u => u.status === 'active' || u.isAdmin).length;
+    const threshold = Math.ceil(activeUsersCount * 0.3); // 30% threshold
+    
+    const excludedMovies = allMovies.filter(m => m.totalVotes > threshold);
+    const excludeTitles = excludedMovies.map(m => m.title).join(', ');
 
     const systemPrompt = `
         Eres el Organizador Creativo del Cineforum "Cine Mensa Murcia".
@@ -189,8 +195,8 @@ export const generateCineforumEvent = async (
         2. ELIGE 3 CANDIDATAS:
            - Deben ser películas BUENAS (rating alto).
            - Deben encajar perfectamente en tu tema.
-           - NO pueden estar en la lista de EXCLUIDAS (ya vistas por el club).
-           - Intenta mezclar: una famosa, una de culto y una joya oculta.
+           - REGLA DE ORO (70%): NO pueden estar en la lista de EXCLUIDAS (películas que ya ha visto mucha gente del club). Deben ser joyas ocultas o menos conocidas para la mayoría.
+           - Intenta mezclar: una de culto, una joya oculta y una sorpresa.
 
         3. JUSTIFICACIÓN:
            Vende el evento. Explica por qué este tema es interesante ahora.
@@ -198,7 +204,7 @@ export const generateCineforumEvent = async (
         4. IMAGEN DE FONDO (IA):
            Describe visualmente el tema en una frase corta en INGLÉS para generar una imagen de fondo (ej: "neon city raining night cyberpunk cinematic").
 
-        Lista de EXCLUIDAS (NO ELEGIR): ${excludeList}
+        Lista de EXCLUIDAS (YA VISTAS POR >30% DEL CLUB): ${excludeTitles}
 
         Formato JSON Requerido:
         {

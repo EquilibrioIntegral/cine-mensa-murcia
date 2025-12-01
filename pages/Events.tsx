@@ -1,12 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info } from 'lucide-react';
 import { EventCandidate } from '../types';
 
 const Events: React.FC = () => {
-  const { user, activeEvent, movies, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages } = useData();
+  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages } = useData();
   const [generating, setGenerating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [startingDiscussion, setStartingDiscussion] = useState(false);
@@ -47,7 +48,8 @@ const Events: React.FC = () => {
   const handleCreate = async () => {
       setGenerating(true);
       try {
-          const newEventData = await generateCineforumEvent(movies, tmdbToken);
+          // Pass all users to calculate the 70% rule
+          const newEventData = await generateCineforumEvent(movies, allUsers, tmdbToken);
           if (newEventData) {
               await createEvent(newEventData);
           }
@@ -227,6 +229,10 @@ const Events: React.FC = () => {
       ? activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId) 
       : null;
 
+  // FORMAT DATES FOR UI
+  const startDate = new Date(activeEvent.startDate).toLocaleDateString();
+  const endDate = new Date(activeEvent.votingDeadline).toLocaleDateString();
+
   return (
     <div className="min-h-screen bg-cine-dark pb-20 relative overflow-hidden flex flex-col">
         {/* Aesthetic Background - AI Generated or Fallback */}
@@ -276,12 +282,31 @@ const Events: React.FC = () => {
             {/* PHASE 1: VOTING */}
             {activeEvent.phase === 'voting' && (
                 <div className="max-w-6xl mx-auto animate-fade-in pb-10">
-                    <div className="bg-gradient-to-r from-cine-gold/20 to-transparent border-l-4 border-cine-gold p-6 rounded-r-xl mb-12 flex items-start gap-4">
-                        <Sparkles className="text-cine-gold shrink-0 mt-1" size={32} />
-                        <div>
-                            <h3 className="font-bold text-2xl text-cine-gold mb-2">Elección de la Comunidad</h3>
-                            <p className="text-gray-200 text-lg">{activeEvent.aiReasoning}</p>
-                            <p className="text-sm text-gray-400 mt-3 flex items-center gap-1"><Clock size={14}/> La votación se cierra en 7 días.</p>
+                    
+                    {/* INFO & DATES BOX */}
+                    <div className="bg-gradient-to-r from-cine-gold/20 to-transparent border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6">
+                        <div className="flex-grow">
+                             <div className="flex items-center gap-2 text-cine-gold font-bold text-lg mb-2">
+                                <Sparkles size={20}/> Elección de la Comunidad
+                             </div>
+                             <p className="text-gray-200 mb-3">{activeEvent.aiReasoning}</p>
+                             <div className="bg-black/40 p-3 rounded-lg border border-cine-gold/20 inline-block">
+                                <p className="text-sm font-bold text-gray-300 flex items-center gap-2">
+                                    <Calendar size={16} className="text-cine-gold"/> 
+                                    Período de Votación: <span className="text-white">Del {startDate} al {endDate}</span>
+                                </p>
+                             </div>
+                        </div>
+                        
+                        {/* 70% RULE EXPLANATION */}
+                        <div className="bg-black/50 p-4 rounded-xl border border-gray-700 max-w-sm">
+                            <h4 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><Info size={12}/> ¿Cómo funciona?</h4>
+                            <ul className="text-xs text-gray-300 space-y-1 list-disc pl-4">
+                                <li>Vota tu favorita esta semana.</li>
+                                <li>La ganadora se anunciará el {endDate}.</li>
+                                <li>Tendremos 7 días para verla antes del debate.</li>
+                                <li className="text-cine-gold">Solo se proponen películas que el 70% del club NO ha visto.</li>
+                            </ul>
                         </div>
                     </div>
 
@@ -393,7 +418,7 @@ const Events: React.FC = () => {
 
             {/* PHASE 3: DISCUSSION (CHAT) */}
             {activeEvent.phase === 'discussion' && (
-                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full">
+                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full">
                     {/* Chat Header */}
                     <div className="bg-black/40 p-4 border-b border-gray-800 flex justify-between items-center flex-shrink-0">
                          <div className="flex items-center gap-3">

@@ -60,7 +60,7 @@ interface DataContextType {
   // News & Feedback
   sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
   resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
-  publishNews: (title: string, content: string, type: 'general' | 'update', imageUrl?: string) => Promise<void>;
+  publishNews: (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => Promise<void>;
   deleteFeedback: (id: string) => Promise<void>;
 }
 
@@ -397,13 +397,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               candidates: eventData.candidates || [],
               phase: 'voting',
               startDate: Date.now(),
-              votingDeadline: Date.now() + (7 * 24 * 60 * 60 * 1000),
-              viewingDeadline: Date.now() + (14 * 24 * 60 * 60 * 1000),
+              votingDeadline: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days from now
+              viewingDeadline: Date.now() + (14 * 24 * 60 * 60 * 1000), // 14 days from now
               backdropUrl: eventData.backdropUrl
           };
           await setDoc(doc(db, 'events', newEvent.id), newEvent);
-          // Auto publish news
-          await publishNews("¡Nuevo Evento Cineforum!", `Temática: ${newEvent.themeTitle}. ¡Vota ya tus favoritas!`, 'event');
+          
+          // Auto publish news WITH RICH CONTENT AND AI IMAGE
+          const startDate = new Date(newEvent.startDate).toLocaleDateString();
+          const endDate = new Date(newEvent.votingDeadline).toLocaleDateString();
+          
+          const newsTitle = `🎬 ¡EVENTO: ${newEvent.themeTitle}!`;
+          const newsContent = `Periodo de Votación abierto del ${startDate} al ${endDate}.\n\nTemática: "${newEvent.themeDescription}"\n\n¡Entra en la sección de Eventos, revisa las candidatas y vota por tu favorita!`;
+          
+          await publishNews(newsTitle, newsContent, 'event', newEvent.backdropUrl);
+          
       } catch (e) { console.error(String(e)); }
   };
 
@@ -477,7 +485,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const fbRef = doc(db, 'feedback', feedbackId);
           await updateDoc(fbRef, { status: 'solved', adminResponse: response || 'Gracias por tu aporte.' });
           
-          // Auto publish news logic
+          // Auto publish news
           const fbDoc = await getDoc(fbRef);
           const fbData = fbDoc.data() as AppFeedback;
           const title = fbData.type === 'bug' ? '🐛 Bug Corregido' : '✨ Nueva Mejora';
