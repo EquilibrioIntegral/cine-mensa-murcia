@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -106,7 +106,7 @@ const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, 
 };
 
 const MovieDetails: React.FC = () => {
-  const { selectedMovieId, tmdbToken, addMovie, movies, setView, user, toggleWatchlist, rateMovie, unwatchMovie, userRatings, allUsers, toggleReviewVote } = useData();
+  const { selectedMovieId, tmdbToken, addMovie, movies, setView, user, toggleWatchlist, rateMovie, unwatchMovie, userRatings, allUsers, toggleReviewVote, liveSession } = useData();
   const [details, setDetails] = useState<TMDBMovieDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [isInDb, setIsInDb] = useState(false);
@@ -338,7 +338,18 @@ const MovieDetails: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-cine-dark pb-20">
+    <div className="min-h-screen bg-cine-dark pb-20 relative">
+      {/* FLOATING RETURN TO CALL BUTTON */}
+      {liveSession.isConnected && (
+          <button 
+            onClick={() => setView(ViewState.RECOMMENDATIONS)}
+            className="fixed bottom-24 right-6 z-[60] bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-full shadow-[0_0_20px_rgba(22,163,74,0.5)] flex items-center gap-2 animate-bounce transition-all"
+          >
+              <Phone size={20} className="animate-pulse"/> 
+              En llamada...
+          </button>
+      )}
+
       <RatingModal 
         isOpen={showRatingModal}
         onClose={() => setShowRatingModal(false)}
@@ -480,7 +491,7 @@ const MovieDetails: React.FC = () => {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                           {Object.entries(userRating.detailed).map(([key, val]) => {
                               if (key === 'average') return null;
-                              const labels: any = { script: 'Guion', direction: 'Dirección', photography: 'Fotografía', acting: 'Actuación', soundtrack: 'BSO', enjoyment: 'Disfrute' };
+                              const labels: any = { script: 'Guion', direction: 'Dirección', photography: 'Fotografía', acting: 'Actuación', soundtrack: 'Banda Sonora', enjoyment: 'Disfrute' };
                               const numericVal = val as number;
                               return (
                                   <div key={key} className="bg-black/30 p-3 rounded border border-gray-800">

@@ -2,52 +2,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieRecommendations, sendChatToGemini } from '../services/geminiService';
+import { getImageUrl } from '../services/tmdbService';
 import MovieCard from '../components/MovieCard';
-import { Sparkles, Loader2, AlertTriangle, MessageSquare, Bot, Send, User as UserIcon, Mic, MicOff, Volume2, VolumeX, Zap, Phone, PhoneOff, Radio } from 'lucide-react';
+import { Sparkles, Loader2, AlertTriangle, Bot, Send, User as UserIcon, Mic, MicOff, Volume2, VolumeX, Zap, Phone, PhoneOff, Radio, Tv, X } from 'lucide-react';
 import { Movie, ChatMessage } from '../types';
-import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
-
-// --- AUDIO UTILS FOR LIVE API ---
-
-// Convert Base64 to Uint8Array
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
-// Convert float32 audio data to PCM16 blob for Gemini
-function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    // Clamp values
-    let s = Math.max(-1, Math.min(1, data[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  
-  // Custom manual encoding to base64
-  let binary = '';
-  const bytes = new Uint8Array(int16.buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  
-  return {
-    data: btoa(binary),
-    mimeType: 'audio/pcm;rate=16000',
-  };
-}
 
 const Recommendations: React.FC = () => {
-  const { user, movies, userRatings, tmdbToken } = useData();
+  const { user, movies, userRatings, tmdbToken, liveSession, startLiveSession, stopLiveSession } = useData();
   const [activeTab, setActiveTab] = useState<'simple' | 'chat' | 'live'>('simple');
   
+  // Auto-switch to live tab if connected
+  useEffect(() => {
+      if (liveSession.isConnected) setActiveTab('live');
+  }, [liveSession.isConnected]);
+
   // Simple Mode State
   const [recommendations, setRecommendations] = useState<Movie[]>([]);
   const [loadingRecs, setLoadingRecs] = useState(false);
@@ -63,236 +31,6 @@ const Recommendations: React.FC = () => {
   const [isListeningLegacy, setIsListeningLegacy] = useState(false);
   const [voiceEnabledLegacy, setVoiceEnabledLegacy] = useState(false);
   const recognitionRef = useRef<any>(null);
-
-  // --- LIVE API STATE ---
-  const [isLiveConnected, setIsLiveConnected] = useState(false);
-  const [liveStatus, setLiveStatus] = useState<string>('Desconectado');
-  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
-  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
-  
-  // Refs for Live API Audio
-  const liveSessionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextStartTimeRef = useRef<number>(0);
-  const currentStreamRef = useRef<MediaStream | null>(null);
-
-  // --- LIVE API HANDLERS ---
-
-  const stopLiveSession = () => {
-      // 1. Close session
-      if (liveSessionRef.current) {
-          try { liveSessionRef.current.close(); } catch(e) {}
-          liveSessionRef.current = null;
-      }
-
-      // 2. Stop Audio Context & Microphone
-      if (processorRef.current) {
-          processorRef.current.disconnect();
-          processorRef.current = null;
-      }
-      if (inputSourceRef.current) {
-          inputSourceRef.current.disconnect();
-          inputSourceRef.current = null;
-      }
-      if (currentStreamRef.current) {
-          currentStreamRef.current.getTracks().forEach(track => track.stop());
-          currentStreamRef.current = null;
-      }
-      if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
-      }
-
-      // 3. Clear Queue
-      audioQueueRef.current.forEach(source => {
-          try { source.stop(); } catch(e) {}
-      });
-      audioQueueRef.current = [];
-
-      setIsLiveConnected(false);
-      setLiveStatus("Llamada finalizada");
-      setIsUserSpeaking(false);
-      setIsAiSpeaking(false);
-  };
-
-  const startLiveSession = async () => {
-      if (!user) return;
-      
-      try {
-          setLiveStatus("Conectando...");
-          setIsLiveConnected(true);
-
-          // 1. Prepare Context (User Profile)
-          const watchedTitles = movies.filter(m => user.watchedMovies.includes(m.id)).map(m => m.title).join(", ");
-          const systemInstruction = `
-            Eres un experto en cine del club "Cine Mensa Murcia". Estás en una llamada de voz en tiempo real con el socio ${user.name}.
-            
-            DATOS DEL USUARIO:
-            - Ha visto: ${watchedTitles.slice(0, 500)}...
-            
-            OBJETIVO:
-            - Mantener una conversación natural, fluida y divertida sobre cine.
-            - Recomendar películas si te lo pide.
-            - Responder dudas sobre actores o tramas.
-            - IMPORTANTE: Tus respuestas deben ser BREVES y conversacionales (1-3 frases), no sueltes monólogos largos porque es una charla de voz.
-            - Muestra personalidad, entusiasmo y humor.
-          `;
-
-          // 2. Initialize Audio Context
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioContextClass({ sampleRate: 16000 }); // Gemini prefers 16k input
-          audioContextRef.current = ctx;
-          nextStartTimeRef.current = ctx.currentTime;
-
-          // 3. Initialize Gemini Client
-          const client = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-          
-          // 4. Connect
-          const sessionPromise = client.live.connect({
-              model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-              config: {
-                  responseModalities: [Modality.AUDIO], // Audio Only for voice chat
-                  systemInstruction: systemInstruction,
-                  speechConfig: {
-                      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } // Aoife, Kore, Puck, Charon, Fenrir
-                  }
-              },
-              callbacks: {
-                  onopen: async () => {
-                      setLiveStatus("Conectado - Escuchando...");
-                      
-                      // Start Microphone Stream
-                      try {
-                          const stream = await navigator.mediaDevices.getUserMedia({ 
-                              audio: { 
-                                  sampleRate: 16000,
-                                  channelCount: 1,
-                                  echoCancellation: true,
-                                  noiseSuppression: true,
-                                  autoGainControl: true
-                              } 
-                          });
-                          currentStreamRef.current = stream;
-                          
-                          const source = ctx.createMediaStreamSource(stream);
-                          inputSourceRef.current = source;
-                          
-                          // Process Audio
-                          const processor = ctx.createScriptProcessor(4096, 1, 1);
-                          processorRef.current = processor;
-                          
-                          processor.onaudioprocess = (e) => {
-                              const inputData = e.inputBuffer.getChannelData(0);
-                              
-                              // Simple VAD (Visual feedback only)
-                              const rms = Math.sqrt(inputData.reduce((s, v) => s + v * v, 0) / inputData.length);
-                              if (rms > 0.02) setIsUserSpeaking(true);
-                              else setIsUserSpeaking(false);
-
-                              const pcmBlob = createPcmBlob(inputData);
-                              
-                              sessionPromise.then(session => {
-                                  session.sendRealtimeInput({ media: pcmBlob });
-                              });
-                          };
-
-                          source.connect(processor);
-                          processor.connect(ctx.destination); // Required for script processor to run
-                      } catch (err) {
-                          console.error("Mic Error:", err);
-                          setLiveStatus("Error de Micrófono");
-                          stopLiveSession();
-                      }
-                  },
-                  onmessage: async (msg: LiveServerMessage) => {
-                      // Handle Audio Output
-                      const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-                      if (audioData) {
-                          setIsAiSpeaking(true);
-                          try {
-                              const audioBytes = base64ToUint8Array(audioData);
-                              
-                              // Decode manually because decodeAudioData expects headers (wav/mp3), but we get Raw PCM
-                              // Assuming server sends 24kHz PCM16 (standard for this model output)
-                              // We need to convert Int16 Little Endian to Float32
-                              const pcm16 = new Int16Array(audioBytes.buffer);
-                              const float32 = new Float32Array(pcm16.length);
-                              for (let i = 0; i < pcm16.length; i++) {
-                                  float32[i] = pcm16[i] / 32768.0;
-                              }
-
-                              // Create Buffer
-                              const outputBuffer = ctx.createBuffer(1, float32.length, 24000);
-                              outputBuffer.copyToChannel(float32, 0);
-
-                              // Schedule Playback
-                              const source = ctx.createBufferSource();
-                              source.buffer = outputBuffer;
-                              source.connect(ctx.destination);
-                              
-                              // Seamless queueing
-                              const now = ctx.currentTime;
-                              // If next start time is in the past, reset to now (plus small buffer)
-                              if (nextStartTimeRef.current < now) nextStartTimeRef.current = now + 0.05;
-                              
-                              source.start(nextStartTimeRef.current);
-                              nextStartTimeRef.current += outputBuffer.duration;
-                              
-                              source.onended = () => {
-                                  // Remove from queue set
-                                  audioQueueRef.current = audioQueueRef.current.filter(s => s !== source);
-                                  if (audioQueueRef.current.length === 0) setIsAiSpeaking(false);
-                              };
-
-                              audioQueueRef.current.push(source);
-
-                          } catch (e) {
-                              console.error("Audio Decode Error:", e);
-                          }
-                      }
-
-                      // Handle Interruption (User spoke while AI was speaking)
-                      if (msg.serverContent?.interrupted) {
-                          console.log("Interrupted!");
-                          // Stop all currently playing sources
-                          audioQueueRef.current.forEach(s => {
-                              try { s.stop(); } catch(e) {}
-                          });
-                          audioQueueRef.current = [];
-                          nextStartTimeRef.current = 0;
-                          setIsAiSpeaking(false);
-                      }
-                  },
-                  onclose: () => {
-                      console.log("Live Session Closed");
-                      stopLiveSession();
-                  },
-                  onerror: (e) => {
-                      console.error("Live Session Error:", e);
-                      setLiveStatus("Error de Conexión");
-                  }
-              }
-          });
-          
-          liveSessionRef.current = await sessionPromise;
-
-      } catch (e) {
-          console.error("Connection Failed:", e);
-          setLiveStatus("Error al conectar");
-          setIsLiveConnected(false);
-      }
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-      return () => {
-          stopLiveSession();
-      };
-  }, []);
-
 
   // --- LEGACY VOICE HANDLERS (TEXT MODE) ---
   const toggleListeningLegacy = () => {
@@ -348,7 +86,7 @@ const Recommendations: React.FC = () => {
 
 
   return (
-    <div className="container mx-auto px-4 py-8 pb-20 max-w-6xl">
+    <div className="container mx-auto px-4 py-8 pb-20 max-w-6xl relative">
       <div className="text-center mb-8">
         <div className="inline-flex items-center justify-center p-3 bg-cine-gold/10 rounded-full mb-4">
             <Sparkles className="text-cine-gold" size={32} />
@@ -358,10 +96,10 @@ const Recommendations: React.FC = () => {
 
       {/* TABS */}
       <div className="flex flex-wrap justify-center mb-8 gap-2 bg-cine-gray p-1 rounded-full w-fit mx-auto border border-gray-800">
-          <button onClick={() => { stopLiveSession(); setActiveTab('simple'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'simple' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('simple'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'simple' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
               <Zap size={18} /> <span className="hidden sm:inline">Rápida</span>
           </button>
-          <button onClick={() => { stopLiveSession(); setActiveTab('chat'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'chat' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
+          <button onClick={() => { setActiveTab('chat'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'chat' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
               <Bot size={18} /> <span className="hidden sm:inline">Chat</span>
           </button>
           <button onClick={() => { setActiveTab('live'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'live' ? 'bg-red-600 text-white shadow-lg animate-pulse' : 'text-gray-400 hover:text-white'}`}>
@@ -371,60 +109,88 @@ const Recommendations: React.FC = () => {
 
       {/* --- LIVE MODE VIEW --- */}
       {activeTab === 'live' && (
-          <div className="flex flex-col items-center justify-center min-h-[500px] bg-cine-gray rounded-2xl border border-gray-800 p-8 relative overflow-hidden shadow-2xl animate-fade-in">
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cine-gold/5 via-transparent to-transparent"></div>
-              
-              {!isLiveConnected ? (
-                  <div className="text-center z-10">
-                      <div className="w-32 h-32 bg-black rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-gray-800 shadow-xl">
-                          <Mic size={48} className="text-gray-500" />
-                      </div>
-                      <h3 className="text-2xl font-bold text-white mb-2">Conversación Natural</h3>
-                      <p className="text-gray-400 max-w-md mx-auto mb-8">
-                          Habla con la IA como si fuera una llamada real. Interrúmpela cuando quieras, no hace falta pulsar botones para hablar.
-                      </p>
-                      <button 
-                        onClick={startLiveSession}
-                        className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3"
-                      >
-                          <Phone size={24} /> Iniciar Llamada
-                      </button>
-                  </div>
-              ) : (
-                  <div className="text-center z-10 w-full flex flex-col items-center">
-                      <div className="mb-4 bg-black/40 px-4 py-2 rounded-full border border-gray-700 backdrop-blur-sm">
-                          <p className="text-cine-gold font-mono text-sm flex items-center gap-2">
-                              <Radio size={14} className="animate-pulse"/> {liveStatus}
-                          </p>
-                      </div>
-
-                      {/* Visualizer Circle */}
-                      <div className="relative w-64 h-64 flex items-center justify-center mb-12">
-                          {/* AI Speaking Ring */}
-                          <div className={`absolute inset-0 rounded-full border-4 transition-all duration-100 ${isAiSpeaking ? 'border-cine-gold scale-110 opacity-100 shadow-[0_0_50px_rgba(212,175,55,0.6)]' : 'border-gray-800 scale-100 opacity-50'}`}></div>
-                          
-                          {/* User Speaking Ring */}
-                          <div className={`absolute inset-4 rounded-full border-4 transition-all duration-100 ${isUserSpeaking ? 'border-green-500 scale-105 opacity-100 shadow-[0_0_30px_rgba(34,197,94,0.5)]' : 'border-transparent scale-95 opacity-0'}`}></div>
-
-                          <div className="w-48 h-48 bg-black rounded-full flex items-center justify-center relative z-10 overflow-hidden shadow-2xl">
-                              <img src="https://ui-avatars.com/api/?name=AI&background=000&color=d4af37&size=200" alt="AI" className="w-full h-full object-cover opacity-80" />
-                              {isAiSpeaking && <div className="absolute inset-0 bg-cine-gold/20 animate-pulse"></div>}
+          <div className="relative">
+              <div className="flex flex-col items-center justify-center min-h-[500px] bg-cine-gray rounded-2xl border border-gray-800 p-8 relative overflow-hidden shadow-2xl animate-fade-in">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cine-gold/5 via-transparent to-transparent"></div>
+                  
+                  {!liveSession.isConnected ? (
+                      <div className="text-center z-10">
+                          <div className="w-32 h-32 bg-black rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-gray-800 shadow-xl">
+                              <Mic size={48} className="text-gray-500" />
                           </div>
-                      </div>
-
-                      <div className="flex gap-4">
+                          <h3 className="text-2xl font-bold text-white mb-2">Conversación Natural</h3>
+                          <p className="text-gray-400 max-w-md mx-auto mb-8">
+                              Habla con la IA como si fuera una llamada real. Interrúmpela cuando quieras, no hace falta pulsar botones para hablar.
+                          </p>
                           <button 
-                            onClick={stopLiveSession}
-                            className="bg-red-600 hover:bg-red-500 text-white p-6 rounded-full shadow-xl transition-all transform hover:scale-110"
-                            title="Colgar"
+                            onClick={startLiveSession}
+                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3"
                           >
-                              <PhoneOff size={32} />
+                              <Phone size={24} /> Iniciar Llamada
                           </button>
                       </div>
-                      
-                      <p className="mt-8 text-gray-500 text-sm">
-                          {isUserSpeaking ? "Te estoy escuchando..." : isAiSpeaking ? "Hablando..." : "Escuchando..."}
-                      </p>
+                  ) : (
+                      <div className="text-center z-10 w-full flex flex-col items-center">
+                          <div className="mb-4 bg-black/40 px-4 py-2 rounded-full border border-gray-700 backdrop-blur-sm">
+                              <p className="text-cine-gold font-mono text-sm flex items-center gap-2">
+                                  <Radio size={14} className="animate-pulse"/> {liveSession.status}
+                              </p>
+                          </div>
+
+                          {/* Visualizer Circle */}
+                          <div className="relative w-64 h-64 flex items-center justify-center mb-8">
+                              <div className={`absolute inset-0 rounded-full border-4 transition-all duration-100 ${liveSession.isAiSpeaking ? 'border-cine-gold scale-110 opacity-100 shadow-[0_0_50px_rgba(212,175,55,0.6)]' : 'border-gray-800 scale-100 opacity-50'}`}></div>
+                              <div className={`absolute inset-4 rounded-full border-4 transition-all duration-100 ${liveSession.isUserSpeaking ? 'border-green-500 scale-105 opacity-100 shadow-[0_0_30px_rgba(34,197,94,0.5)]' : 'border-transparent scale-95 opacity-0'}`}></div>
+                              <div className="w-48 h-48 bg-black rounded-full flex items-center justify-center relative z-10 overflow-hidden shadow-2xl">
+                                  <img src="https://ui-avatars.com/api/?name=AI&background=000&color=d4af37&size=200" alt="AI" className="w-full h-full object-cover opacity-80" />
+                                  {liveSession.isAiSpeaking && <div className="absolute inset-0 bg-cine-gold/20 animate-pulse"></div>}
+                              </div>
+                          </div>
+
+                          <div className="flex gap-4 mb-4">
+                              <button 
+                                onClick={stopLiveSession}
+                                className="bg-red-600 hover:bg-red-500 text-white p-6 rounded-full shadow-xl transition-all transform hover:scale-110"
+                                title="Colgar"
+                              >
+                                  <PhoneOff size={32} />
+                              </button>
+                          </div>
+                          
+                          <p className="mt-2 text-gray-500 text-sm">
+                              {liveSession.isUserSpeaking ? "Te estoy escuchando..." : liveSession.isAiSpeaking ? "Hablando..." : "Escuchando..."}
+                          </p>
+                      </div>
+                  )}
+              </div>
+
+              {/* VISUAL CONTENT POP-UP OVERLAY (Independent Scroll) */}
+              {liveSession.isConnected && (liveSession.visualContent.length > 0 || liveSession.toolInUse) && (
+                  <div className="fixed top-20 right-4 w-80 max-h-[80vh] bg-black/80 backdrop-blur-xl border border-cine-gold/30 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50 animate-slide-in-right">
+                      <div className="p-3 bg-black/60 border-b border-gray-700 flex justify-between items-center">
+                          <h4 className="text-cine-gold font-bold text-sm flex items-center gap-2"><Tv size={14}/> Pantalla Compartida</h4>
+                          {liveSession.toolInUse && <div className="flex items-center gap-1 text-xs text-gray-400"><Loader2 size={10} className="animate-spin"/> {liveSession.toolInUse}</div>}
+                      </div>
+                      <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar flex-grow">
+                          {liveSession.visualContent.map((item, idx) => (
+                              <div key={idx} className="animate-fade-in">
+                                  {item.type === 'movie' ? (
+                                      <div className="transform scale-90 origin-top-left">
+                                          <MovieCard movie={item.data} showRatingInput={false} />
+                                      </div>
+                                  ) : (
+                                      <div className="flex flex-col items-center bg-cine-gray p-3 rounded-xl border border-gray-700">
+                                          <div className="w-20 h-20 rounded-full border-2 border-cine-gold overflow-hidden shadow-lg mb-2">
+                                              <img src={getImageUrl(item.data.profile_path, 'w200')} className="w-full h-full object-cover" alt={item.data.name} />
+                                          </div>
+                                          <span className="text-sm font-bold text-white">{item.data.name}</span>
+                                          <span className="text-xs text-gray-500">Actor/Director</span>
+                                      </div>
+                                  )}
+                              </div>
+                          ))}
+                          <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
+                      </div>
                   </div>
               )}
           </div>

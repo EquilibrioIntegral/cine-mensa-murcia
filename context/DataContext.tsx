@@ -1,6 +1,6 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem } from '../types';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState } from '../types';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -27,6 +27,35 @@ import {
   getCountFromServer
 } from "firebase/firestore";
 import { decideBestTime } from '../services/geminiService';
+import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
+import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB } from '../services/tmdbService';
+
+// --- AUDIO UTILS ---
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    let s = Math.max(-1, Math.min(1, data[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  let binary = '';
+  const bytes = new Uint8Array(int16.buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return { data: btoa(binary), mimeType: 'audio/pcm;rate=16000' };
+}
 
 interface DataContextType {
   user: User | null;
@@ -40,6 +69,12 @@ interface DataContextType {
   currentView: ViewState;
   selectedMovieId: string | null;
   tmdbToken: string;
+  
+  // Live Session Global State
+  liveSession: LiveSessionState;
+  startLiveSession: () => Promise<void>;
+  stopLiveSession: () => void;
+
   setTmdbToken: (token: string) => Promise<void>;
   login: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
@@ -56,7 +91,6 @@ interface DataContextType {
   addMovie: (movie: Movie) => Promise<void>;
   getMovie: (id: string) => Movie | undefined;
   
-  // Event Methods
   createEvent: (eventData: Partial<CineEvent>) => Promise<void>;
   closeEvent: (eventId: string) => Promise<void>;
   voteForCandidate: (eventId: string, tmdbId: number) => Promise<void>;
@@ -65,13 +99,11 @@ interface DataContextType {
   toggleEventCommitment: (eventId: string, type: 'view' | 'debate') => Promise<void>;
   toggleTimeVote: (eventId: string, timeSlot: string) => Promise<void>;
 
-  // News & Feedback
   sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
   resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
   publishNews: (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => Promise<void>;
   deleteFeedback: (id: string) => Promise<void>;
   
-  // Helpers
   getEpisodeCount: () => Promise<number>;
 }
 
@@ -90,6 +122,229 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [eventMessages, setEventMessages] = useState<EventMessage[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [feedbackList, setFeedbackList] = useState<AppFeedback[]>([]);
+
+  // --- LIVE SESSION STATE ---
+  const [liveSession, setLiveSession] = useState<LiveSessionState>({
+      isConnected: false,
+      status: 'Desconectado',
+      isUserSpeaking: false,
+      isAiSpeaking: false,
+      toolInUse: null,
+      visualContent: []
+  });
+
+  // Refs for Live API Audio (Persisted in Provider)
+  const liveSessionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
+  const nextStartTimeRef = useRef<number>(0);
+  const currentStreamRef = useRef<MediaStream | null>(null);
+
+  // --- LIVE SESSION METHODS ---
+  const stopLiveSession = () => {
+      if (liveSessionRef.current) {
+          try { liveSessionRef.current.close(); } catch(e) {}
+          liveSessionRef.current = null;
+      }
+      if (processorRef.current) { processorRef.current.disconnect(); processorRef.current = null; }
+      if (inputSourceRef.current) { inputSourceRef.current.disconnect(); inputSourceRef.current = null; }
+      if (currentStreamRef.current) { currentStreamRef.current.getTracks().forEach(track => track.stop()); currentStreamRef.current = null; }
+      if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
+      audioQueueRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
+      audioQueueRef.current = [];
+
+      setLiveSession({
+          isConnected: false,
+          status: 'Llamada finalizada',
+          isUserSpeaking: false,
+          isAiSpeaking: false,
+          toolInUse: null,
+          visualContent: []
+      });
+  };
+
+  const startLiveSession = async () => {
+      if (!user) return;
+      
+      try {
+          setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...', visualContent: [] }));
+
+          const watchedTitles = movies.filter(m => user.watchedMovies.includes(m.id)).map(m => m.title).join(", ");
+          const systemInstruction = `
+            Eres un experto en cine del club "Cine Mensa Murcia". Estás en una llamada de voz en tiempo real con el socio ${user.name}.
+            DATOS: Ha visto: ${watchedTitles.slice(0, 500)}...
+            OBJETIVO: Conversación natural, fluida y divertida. Respuestas BREVES (1-3 frases).
+            
+            HERRAMIENTAS VISUALES (PANTALLA COMPARTIDA):
+            - Tienes una PANTALLA COMPARTIDA con el usuario. ÚSALA CONSTANTEMENTE.
+            - Si mencionas una PELÍCULA -> Ejecuta "show_movie(titulo)".
+            - Si mencionas un ACTOR o DIRECTOR -> Ejecuta "show_person(nombre)".
+            - ¡Es obligatorio! Muestra el contenido visualmente.
+          `;
+
+          const tools = [{
+            functionDeclarations: [
+              {
+                name: "show_movie",
+                description: "Muestra la ficha y carátula de una película en la pantalla del usuario. USAR SIEMPRE al mencionar una película.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING, description: "Título de la película en español" },
+                    year: { type: Type.NUMBER, description: "Año de estreno (opcional)" }
+                  },
+                  required: ["title"]
+                }
+              },
+              {
+                name: "show_person",
+                description: "Muestra la foto de un actor, director o miembro del equipo en pantalla. USAR SIEMPRE al mencionar una persona.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: { name: { type: Type.STRING, description: "Nombre del actor o director" } },
+                  required: ["name"]
+                }
+              }
+            ]
+          }];
+
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AudioContextClass({ sampleRate: 16000 });
+          audioContextRef.current = ctx;
+          nextStartTimeRef.current = ctx.currentTime;
+
+          const client = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+          const sessionPromise = client.live.connect({
+              model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+              config: {
+                  responseModalities: [Modality.AUDIO],
+                  systemInstruction: systemInstruction,
+                  tools: tools,
+                  speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
+              },
+              callbacks: {
+                  onopen: async () => {
+                      setLiveSession(prev => ({ ...prev, status: 'Conectado - Escuchando...' }));
+                      try {
+                          const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+                          currentStreamRef.current = stream;
+                          const source = ctx.createMediaStreamSource(stream);
+                          inputSourceRef.current = source;
+                          const processor = ctx.createScriptProcessor(4096, 1, 1);
+                          processorRef.current = processor;
+                          
+                          processor.onaudioprocess = (e) => {
+                              const inputData = e.inputBuffer.getChannelData(0);
+                              const rms = Math.sqrt(inputData.reduce((s, v) => s + v * v, 0) / inputData.length);
+                              setLiveSession(prev => ({ ...prev, isUserSpeaking: rms > 0.02 }));
+                              const pcmBlob = createPcmBlob(inputData);
+                              sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+                          };
+                          source.connect(processor);
+                          processor.connect(ctx.destination);
+                      } catch (err) {
+                          console.error("Mic Error:", err);
+                          stopLiveSession();
+                      }
+                  },
+                  onmessage: async (msg: LiveServerMessage) => {
+                      const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                      if (audioData) {
+                          setLiveSession(prev => ({ ...prev, isAiSpeaking: true }));
+                          try {
+                              const audioBytes = base64ToUint8Array(audioData);
+                              const pcm16 = new Int16Array(audioBytes.buffer);
+                              const float32 = new Float32Array(pcm16.length);
+                              for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768.0;
+                              
+                              const outputBuffer = ctx.createBuffer(1, float32.length, 24000);
+                              outputBuffer.copyToChannel(float32, 0);
+                              const source = ctx.createBufferSource();
+                              source.buffer = outputBuffer;
+                              source.connect(ctx.destination);
+                              const now = ctx.currentTime;
+                              if (nextStartTimeRef.current < now) nextStartTimeRef.current = now + 0.05;
+                              source.start(nextStartTimeRef.current);
+                              nextStartTimeRef.current += outputBuffer.duration;
+                              source.onended = () => {
+                                  audioQueueRef.current = audioQueueRef.current.filter(s => s !== source);
+                                  if (audioQueueRef.current.length === 0) setLiveSession(prev => ({ ...prev, isAiSpeaking: false }));
+                              };
+                              audioQueueRef.current.push(source);
+                          } catch (e) { console.error(e); }
+                      }
+
+                      if (msg.serverContent?.interrupted) {
+                          audioQueueRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
+                          audioQueueRef.current = [];
+                          nextStartTimeRef.current = 0;
+                          setLiveSession(prev => ({ ...prev, isAiSpeaking: false }));
+                      }
+
+                      if (msg.toolCall) {
+                          const functionResponses = [];
+                          for (const fc of msg.toolCall.functionCalls) {
+                              if (fc.name === 'show_movie') {
+                                  const { title, year } = fc.args as any;
+                                  setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${title}` }));
+                                  
+                                  // Fetch without awaiting to not block audio
+                                  findMovieByTitleAndYear(title, year, tmdbToken).then(tmdbData => {
+                                      setLiveSession(prev => ({ ...prev, toolInUse: null }));
+                                      if (tmdbData) {
+                                          const mappedMovie: Movie = {
+                                              id: `tmdb-${tmdbData.id}`,
+                                              tmdbId: tmdbData.id,
+                                              title: tmdbData.title,
+                                              year: parseInt(tmdbData.release_date?.split('-')[0]) || 0,
+                                              director: "IA",
+                                              genre: [],
+                                              posterUrl: getImageUrl(tmdbData.poster_path),
+                                              description: tmdbData.overview,
+                                              rating: tmdbData.vote_average,
+                                              totalVotes: 0
+                                          };
+                                          setLiveSession(prev => ({
+                                              ...prev,
+                                              visualContent: [...prev.visualContent, { type: 'movie', data: mappedMovie }]
+                                          }));
+                                      }
+                                  }).catch(() => setLiveSession(prev => ({ ...prev, toolInUse: null })));
+
+                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
+                              }
+                              else if (fc.name === 'show_person') {
+                                  const { name } = fc.args as any;
+                                  setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${name}` }));
+                                  searchPersonTMDB(name, tmdbToken).then(results => {
+                                      setLiveSession(prev => ({ ...prev, toolInUse: null }));
+                                      if (results && results.length > 0) {
+                                          setLiveSession(prev => ({
+                                              ...prev,
+                                              visualContent: [...prev.visualContent, { type: 'person', data: results[0] }]
+                                          }));
+                                      }
+                                  }).catch(() => setLiveSession(prev => ({ ...prev, toolInUse: null })));
+                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
+                              }
+                          }
+                          if (functionResponses.length > 0) {
+                              sessionPromise.then(session => session.sendToolResponse({ functionResponses }));
+                          }
+                      }
+                  },
+                  onclose: () => stopLiveSession(),
+                  onerror: (e) => { console.error(e); setLiveSession(prev => ({ ...prev, status: 'Error de conexión' })); }
+              }
+          });
+          liveSessionRef.current = await sessionPromise;
+      } catch (e) {
+          console.error(e);
+          setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Error' }));
+      }
+  };
 
   // ... Auth useEffect ...
   useEffect(() => {
@@ -367,7 +622,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken,
       setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
       createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote,
-      sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount
+      sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount,
+      liveSession, startLiveSession, stopLiveSession
     }}>
       {children}
     </DataContext.Provider>

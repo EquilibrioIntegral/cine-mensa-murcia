@@ -141,3 +141,16 @@ export interface AppFeedback {
   timestamp: number;
   adminResponse?: string;
 }
+
+// --- LIVE SESSION STATE ---
+export interface LiveSessionState {
+  isConnected: boolean;
+  status: string;
+  isUserSpeaking: boolean;
+  isAiSpeaking: boolean;
+  toolInUse: string | null;
+  visualContent: {
+    type: 'movie' | 'person';
+    data: any; // Movie or TMDBPersonResult
+  }[];
+}
