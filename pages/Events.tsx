@@ -206,7 +206,7 @@ const Events: React.FC = () => {
               <Ticket size={64} className="text-gray-600 mb-6" />
               <h2 className="text-3xl font-bold text-white mb-4">No hay eventos activos</h2>
               <p className="text-gray-400 max-w-md mb-8">
-                  El Cineforum está descansando. Espera a la próxima convocatoria o sugiere una temática al administrador.
+                  El Cineforum está descansando. Espera a la próxima convocatoria del administrador.
               </p>
               
               {user?.isAdmin && (
@@ -240,9 +240,10 @@ const Events: React.FC = () => {
             <img 
                 src={activeEvent.backdropUrl || activeEvent.candidates[0].posterUrl} 
                 alt="Backdrop" 
-                className="w-full h-full object-cover opacity-40 blur-sm" 
+                className="w-full h-full object-cover opacity-65" 
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-cine-dark/80 via-cine-dark/95 to-cine-dark"></div>
+            {/* Gradiente ajustado: transparente arriba para ver imagen, oscuro abajo para contenido */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-cine-dark/70 to-cine-dark"></div>
         </div>
 
         <div className="container mx-auto px-4 py-8 relative z-10 flex-grow flex flex-col">
@@ -253,7 +254,7 @@ const Events: React.FC = () => {
                     <button 
                         onClick={handleCloseEvent}
                         disabled={closing}
-                        className="absolute top-0 right-0 z-50 bg-red-900/40 hover:bg-red-900 text-red-200 p-2 rounded-lg text-xs font-bold flex items-center gap-1 border border-red-900 transition-colors disabled:opacity-50 cursor-pointer pointer-events-auto shadow-lg"
+                        className="absolute top-0 right-0 z-50 bg-red-900/60 hover:bg-red-900 text-red-100 p-2 rounded-lg text-xs font-bold flex items-center gap-1 border border-red-800 transition-colors disabled:opacity-50 cursor-pointer pointer-events-auto shadow-lg backdrop-blur-sm"
                         title="Archivar evento"
                     >
                         {closing ? <Loader2 size={14} className="animate-spin"/> : <Archive size={14} />} 
@@ -264,18 +265,18 @@ const Events: React.FC = () => {
                 <div className="inline-block bg-cine-gold text-black font-bold px-4 py-1 rounded-full text-sm mb-4 uppercase tracking-widest shadow-lg shadow-cine-gold/20">
                     Cineforum Oficial
                 </div>
-                <h1 className="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 mb-2 drop-shadow-2xl uppercase italic leading-none tracking-tighter">
+                <h1 className="text-4xl md:text-6xl font-black text-white mb-2 drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)] uppercase italic leading-none tracking-tighter">
                     {activeEvent.themeTitle}
                 </h1>
-                <p className="text-xl text-gray-200 max-w-3xl mx-auto italic font-serif mb-6 leading-relaxed drop-shadow-md">
+                <p className="text-xl text-white max-w-3xl mx-auto italic font-serif mb-6 leading-relaxed drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
                     "{activeEvent.themeDescription}"
                 </p>
-                <div className="flex justify-center gap-2">
-                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'voting' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/50 text-gray-500 border-gray-700'}`}>1. VOTACIÓN</span>
-                    <ChevronRight className="text-gray-600 self-center"/>
-                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'viewing' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/50 text-gray-500 border-gray-700'}`}>2. PROYECCIÓN</span>
-                    <ChevronRight className="text-gray-600 self-center"/>
-                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'discussion' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/50 text-gray-500 border-gray-700'}`}>3. DEBATE</span>
+                <div className="flex justify-center gap-2 drop-shadow-md">
+                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'voting' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/60 text-gray-400 border-gray-600 backdrop-blur-sm'}`}>1. VOTACIÓN</span>
+                    <ChevronRight className="text-gray-400 self-center"/>
+                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'viewing' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/60 text-gray-400 border-gray-600 backdrop-blur-sm'}`}>2. PROYECCIÓN</span>
+                    <ChevronRight className="text-gray-400 self-center"/>
+                    <span className={`px-4 py-2 rounded-full text-xs font-bold border ${activeEvent.phase === 'discussion' ? 'bg-cine-gold text-black border-cine-gold' : 'bg-black/60 text-gray-400 border-gray-600 backdrop-blur-sm'}`}>3. DEBATE</span>
                 </div>
             </div>
 
@@ -284,7 +285,7 @@ const Events: React.FC = () => {
                 <div className="max-w-6xl mx-auto animate-fade-in pb-10">
                     
                     {/* INFO & DATES BOX */}
-                    <div className="bg-gradient-to-r from-cine-gold/20 to-transparent border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6">
+                    <div className="bg-black/40 backdrop-blur-md border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6 shadow-lg">
                         <div className="flex-grow">
                              <div className="flex items-center gap-2 text-cine-gold font-bold text-lg mb-2">
                                 <Sparkles size={20}/> Elección de la Comunidad
@@ -299,7 +300,7 @@ const Events: React.FC = () => {
                         </div>
                         
                         {/* 70% RULE EXPLANATION */}
-                        <div className="bg-black/50 p-4 rounded-xl border border-gray-700 max-w-sm">
+                        <div className="bg-black/60 p-4 rounded-xl border border-gray-700 max-w-sm">
                             <h4 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1"><Info size={12}/> ¿Cómo funciona?</h4>
                             <ul className="text-xs text-gray-300 space-y-1 list-disc pl-4">
                                 <li>Vota tu favorita esta semana.</li>
@@ -310,7 +311,7 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
-                    <h2 className="text-2xl font-black text-white text-center mb-8 tracking-widest uppercase border-b border-gray-800 pb-4">
+                    <h2 className="text-2xl font-black text-white text-center mb-8 tracking-widest uppercase border-b border-gray-800 pb-4 drop-shadow-md">
                         <span className="text-cine-gold">///</span> Candidatas Oficiales
                     </h2>
 
@@ -324,14 +325,14 @@ const Events: React.FC = () => {
                             const displayReason = personalizedReasons[candidate.tmdbId] || candidate.reason;
 
                             return (
-                                <div key={candidate.tmdbId} className={`group relative rounded-2xl overflow-hidden border-2 transition-all cursor-pointer flex flex-col bg-cine-gray ${isSelected ? 'border-cine-gold shadow-[0_0_30px_rgba(212,175,55,0.2)] scale-105 z-10' : 'border-gray-800 hover:border-gray-500'}`}
+                                <div key={candidate.tmdbId} className={`group relative rounded-2xl overflow-hidden border-2 transition-all cursor-pointer flex flex-col bg-cine-gray ${isSelected ? 'border-cine-gold shadow-[0_0_30px_rgba(212,175,55,0.4)] scale-105 z-10' : 'border-gray-800 hover:border-gray-500 shadow-xl'}`}
                                      onClick={() => voteForCandidate(activeEvent.id, candidate.tmdbId)}
                                 >
                                     <div className="aspect-[2/3] relative overflow-hidden">
                                         <img src={candidate.posterUrl} alt={candidate.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
                                         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80"></div>
                                         <div className="absolute bottom-0 left-0 w-full p-4">
-                                            <h3 className="text-2xl font-bold text-white leading-none mb-1">{candidate.title}</h3>
+                                            <h3 className="text-2xl font-bold text-white leading-none mb-1 drop-shadow-md">{candidate.title}</h3>
                                             <p className="text-cine-gold font-bold">{candidate.year}</p>
                                         </div>
                                         {isSelected && (
@@ -340,7 +341,7 @@ const Events: React.FC = () => {
                                             </div>
                                         )}
                                     </div>
-                                    <div className="p-5 flex flex-col flex-grow">
+                                    <div className="p-5 flex flex-col flex-grow bg-cine-gray">
                                         <div className="mb-6 flex-grow">
                                             {personalizedReasons[candidate.tmdbId] ? (
                                                 <p className="text-xs text-cine-gold font-bold uppercase mb-2 flex items-center gap-1 tracking-wider"><UserCheck size={14}/> Para ti:</p>
@@ -368,7 +369,7 @@ const Events: React.FC = () => {
 
                     {user?.isAdmin && (
                         <div className="mt-16 text-center">
-                            <button onClick={handleEndVoting} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-sm font-bold border border-white/20 transition-all hover:scale-105">
+                            <button onClick={handleEndVoting} className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-full text-sm font-bold border border-white/20 transition-all hover:scale-105 backdrop-blur-sm">
                                 Admin: Cerrar Votación y Elegir Ganadora
                             </button>
                         </div>
@@ -380,11 +381,11 @@ const Events: React.FC = () => {
             {activeEvent.phase === 'viewing' && winner && (
                 <div className="max-w-4xl mx-auto text-center animate-fade-in flex-grow flex flex-col justify-center">
                     <Trophy className="text-cine-gold mx-auto mb-4 animate-bounce" size={64} />
-                    <h2 className="text-3xl font-bold text-white mb-2">¡TENEMOS GANADORA!</h2>
-                    <p className="text-gray-400 mb-8">La comunidad ha hablado. Preparen las palomitas.</p>
+                    <h2 className="text-3xl font-bold text-white mb-2 drop-shadow-md">¡TENEMOS GANADORA!</h2>
+                    <p className="text-gray-200 mb-8 drop-shadow">La comunidad ha hablado. Preparen las palomitas.</p>
                     
-                    <div className="bg-cine-gray rounded-xl border border-cine-gold overflow-hidden shadow-[0_0_50px_rgba(212,175,55,0.2)] max-w-md mx-auto relative group">
-                        <img src={winner.posterUrl} alt={winner.title} className="w-full opacity-80 group-hover:opacity-100 transition-opacity" />
+                    <div className="bg-cine-gray rounded-xl border border-cine-gold overflow-hidden shadow-[0_0_50px_rgba(212,175,55,0.4)] max-w-md mx-auto relative group">
+                        <img src={winner.posterUrl} alt={winner.title} className="w-full opacity-90 group-hover:opacity-100 transition-opacity" />
                         <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-6 pt-20">
                             <h3 className="text-3xl font-bold text-white mb-1">{winner.title}</h3>
                             <p className="text-cine-gold font-bold">{winner.year}</p>
@@ -392,11 +393,11 @@ const Events: React.FC = () => {
                     </div>
 
                     <div className="mt-10">
-                         <div className="inline-flex items-center gap-2 bg-black/40 px-6 py-3 rounded-lg border border-gray-700">
+                         <div className="inline-flex items-center gap-2 bg-black/60 px-6 py-3 rounded-lg border border-gray-700 backdrop-blur-sm">
                              <Clock className="text-gray-400" />
                              <div className="text-left">
-                                 <p className="text-xs text-gray-500 uppercase font-bold">Tiempo para verla</p>
-                                 <p className="text-white font-mono">7 DÍAS</p>
+                                 <p className="text-xs text-gray-400 uppercase font-bold">Tiempo para verla</p>
+                                 <p className="text-white font-mono font-bold">7 DÍAS</p>
                              </div>
                          </div>
                     </div>
@@ -406,7 +407,7 @@ const Events: React.FC = () => {
                             <button 
                                 onClick={handleStartDiscussion}
                                 disabled={startingDiscussion}
-                                className="bg-cine-gold text-black px-6 py-3 rounded-full font-bold hover:bg-white transition-colors flex items-center gap-2 mx-auto disabled:opacity-50"
+                                className="bg-cine-gold text-black px-6 py-3 rounded-full font-bold hover:bg-white transition-colors flex items-center gap-2 mx-auto disabled:opacity-50 shadow-lg"
                             >
                                 {startingDiscussion ? <Loader2 className="animate-spin" size={18}/> : <MessageCircle size={18}/>}
                                 {startingDiscussion ? 'Preparando Sala...' : 'Admin: Abrir Sala de Debate'}
@@ -418,7 +419,7 @@ const Events: React.FC = () => {
 
             {/* PHASE 3: DISCUSSION (CHAT) */}
             {activeEvent.phase === 'discussion' && (
-                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full">
+                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full backdrop-blur-sm bg-cine-gray/95">
                     {/* Chat Header */}
                     <div className="bg-black/40 p-4 border-b border-gray-800 flex justify-between items-center flex-shrink-0">
                          <div className="flex items-center gap-3">
