@@ -403,14 +403,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           await setDoc(doc(db, 'events', newEvent.id), newEvent);
           
-          // Auto publish news WITH RICH CONTENT AND AI IMAGE
-          const startDate = new Date(newEvent.startDate).toLocaleDateString();
-          const endDate = new Date(newEvent.votingDeadline).toLocaleDateString();
-          
-          const newsTitle = `🎬 ¡EVENTO: ${newEvent.themeTitle}!`;
-          const newsContent = `Periodo de Votación abierto del ${startDate} al ${endDate}.\n\nTemática: "${newEvent.themeDescription}"\n\n¡Entra en la sección de Eventos, revisa las candidatas y vota por tu favorita!`;
-          
-          await publishNews(newsTitle, newsContent, 'event', newEvent.backdropUrl);
+          // NOTA: Se ha eliminado la creación automática de noticias duplicadas.
+          // La información del evento activo se mostrará directamente en el Dashboard de Noticias
+          // usando los datos del evento (backdropUrl, themeTitle, dates).
           
       } catch (e) { console.error(String(e)); }
   };
