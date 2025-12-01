@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -289,7 +290,11 @@ const MovieDetails: React.FC = () => {
   if (loading) return <div className="flex justify-center items-center h-[50vh]"><div className="animate-spin text-cine-gold">Cargando...</div></div>;
   if (!details) return <div className="text-center p-10">Película no encontrada</div>;
 
-  const director = details.credits.crew.find(c => c.job === 'Director')?.name;
+  // Extract Technical Crew
+  const directors = details.credits.crew.filter(c => c.job === 'Director').map(c => c.name).join(', ');
+  const writers = [...new Set(details.credits.crew.filter(c => ['Screenplay', 'Writer', 'Story', 'Screenstory'].includes(c.job)).map(c => c.name))].join(', ');
+  const music = details.credits.crew.filter(c => ['Original Music Composer', 'Music'].includes(c.job)).map(c => c.name).join(', ');
+  const photography = details.credits.crew.filter(c => ['Director of Photography', 'Cinematography'].includes(c.job)).map(c => c.name).join(', ');
 
   // Trailer Logic
   const trailer = details.videos?.results.find(v => v.site === "YouTube" && v.type === "Trailer" && v.iso_639_1 === "es") 
@@ -531,6 +536,38 @@ const MovieDetails: React.FC = () => {
 
           {/* Sidebar / Extra Info */}
           <div className="space-y-8">
+               
+               {/* Technical Team (New) */}
+               <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
+                   <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                       <Clapperboard size={18} className="text-cine-gold"/> Ficha Técnica
+                   </h3>
+                   <div className="space-y-4">
+                        <div>
+                            <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Director</span>
+                            <span className="text-gray-200 font-medium">{directors || 'Desconocido'}</span>
+                        </div>
+                        {writers && (
+                            <div>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Guion</span>
+                                <span className="text-gray-200 text-sm">{writers}</span>
+                            </div>
+                        )}
+                        {music && (
+                            <div>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Música</span>
+                                <span className="text-gray-200 text-sm">{music}</span>
+                            </div>
+                        )}
+                        {photography && (
+                            <div>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Fotografía</span>
+                                <span className="text-gray-200 text-sm">{photography}</span>
+                            </div>
+                        )}
+                   </div>
+               </div>
+
                {/* Reviews Section */}
                <div className="bg-cine-gray rounded-xl border border-gray-800 overflow-hidden">
                    <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-black/20">
