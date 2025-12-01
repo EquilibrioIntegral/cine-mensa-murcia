@@ -1,11 +1,11 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Film } from 'lucide-react';
+import { Film, X, Mail } from 'lucide-react';
 import AvatarSelector from '../components/AvatarSelector';
 
 const Login: React.FC = () => {
-  const { login, register } = useData();
+  const { login, register, resetPassword } = useData();
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,6 +13,10 @@ const Login: React.FC = () => {
   const [selectedAvatar, setSelectedAvatar] = useState('');
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Reset Password State
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,10 +60,46 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleResetSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!resetEmail) return;
+      
+      const res = await resetPassword(resetEmail);
+      alert(res.message); // Simple alert or custom message
+      if (res.success) {
+          setShowResetModal(false);
+          setResetEmail('');
+      }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[url('https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
       <div className="absolute inset-0 bg-cine-dark/90 backdrop-blur-sm"></div>
       
+      {/* RESET PASSWORD MODAL */}
+      {showResetModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+              <div className="bg-cine-gray max-w-sm w-full rounded-xl border border-gray-700 shadow-2xl p-6 relative">
+                  <button onClick={() => setShowResetModal(false)} className="absolute top-2 right-2 text-gray-400 hover:text-white"><X size={20}/></button>
+                  <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2"><Mail className="text-cine-gold"/> Recuperar Cuenta</h3>
+                  <p className="text-sm text-gray-400 mb-4">Introduce tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.</p>
+                  <form onSubmit={handleResetSubmit}>
+                      <input 
+                        type="email" 
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="tu@email.com"
+                        className="w-full bg-black/40 border border-gray-700 rounded p-3 text-white focus:border-cine-gold outline-none mb-4"
+                        required
+                      />
+                      <button type="submit" className="w-full bg-cine-gold text-black font-bold py-2 rounded hover:bg-white transition-colors">
+                          Enviar Correo de Recuperación
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
       <div className="relative z-10 w-full max-w-md p-8 bg-black/60 border border-gray-800 rounded-2xl shadow-2xl backdrop-blur-md max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex flex-col items-center mb-8">
             <div className="bg-cine-gold p-3 rounded-full mb-4">
@@ -120,6 +160,18 @@ const Login: React.FC = () => {
                     required
                 />
             </div>
+
+            {!isRegistering && (
+                <div className="flex justify-end">
+                    <button 
+                        type="button" 
+                        onClick={() => setShowResetModal(true)}
+                        className="text-xs text-gray-400 hover:text-cine-gold transition-colors"
+                    >
+                        ¿Olvidaste tu contraseña?
+                    </button>
+                </div>
+            )}
 
             <button 
                 type="submit"

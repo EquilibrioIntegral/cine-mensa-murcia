@@ -6,7 +6,8 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail
 } from "firebase/auth";
 import { 
   collection, 
@@ -40,6 +41,7 @@ interface DataContextType {
   login: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   register: (email: string, name: string, password: string, avatarUrl?: string) => Promise<{ success: boolean; message: string }>;
+  resetPassword: (email: string) => Promise<{ success: boolean; message: string }>;
   updateUserProfile: (name: string, avatarUrl: string) => Promise<void>;
   approveUser: (userId: string) => void;
   rejectUser: (userId: string) => void;
@@ -280,6 +282,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const resetPassword = async (email: string) => {
+      try {
+          await sendPasswordResetEmail(auth, email);
+          return { success: true, message: "Se ha enviado un correo para restablecer tu contraseña. Revisa tu bandeja de entrada (y spam)." };
+      } catch (error: any) {
+          if (error.code === 'auth/user-not-found') return { success: false, message: "No existe ninguna cuenta con ese email." };
+          if (error.code === 'auth/invalid-email') return { success: false, message: "El email no es válido." };
+          return { success: false, message: String(error.message) };
+      }
+  };
+
   const updateUserProfile = async (name: string, avatarUrl: string) => {
       if (!user) return;
       try {
@@ -511,7 +524,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <DataContext.Provider value={{
       user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken,
-      setTmdbToken, login, logout, register, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
+      setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
       createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage,
       sendFeedback, resolveFeedback, publishNews, deleteFeedback
     }}>
