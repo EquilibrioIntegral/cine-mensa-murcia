@@ -3,8 +3,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting, decideBestTime } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv } from 'lucide-react';
 import { EventCandidate } from '../types';
+import MovieCard from '../components/MovieCard';
+import AIVisualizer from '../components/AIVisualizer';
 
 const TIME_CATEGORIES = [
     { 
@@ -45,7 +47,7 @@ const TIME_CATEGORIES = [
 ];
 
 const Events: React.FC = () => {
-  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount } = useData();
+  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, liveSession, startLiveSession, stopLiveSession } = useData();
   const [generating, setGenerating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [startingDiscussion, setStartingDiscussion] = useState(false);
@@ -59,6 +61,7 @@ const Events: React.FC = () => {
 
   // Admin Preview State
   const [adminPreviewMode, setAdminPreviewMode] = useState(false);
+  const [adminDebatePreview, setAdminDebatePreview] = useState(false); // New state for debate simulation
   const [adminTimePreview, setAdminTimePreview] = useState<{ chosenTime: string, message: string } | null>(null);
   const [simulatingTime, setSimulatingTime] = useState(false);
 
@@ -76,6 +79,7 @@ const Events: React.FC = () => {
   useEffect(() => {
       setPersonalizedReasons({});
       setAdminPreviewMode(false);
+      setAdminDebatePreview(false);
       setAdminTimePreview(null);
       setExpandedTimeCat(null);
   }, [activeEvent?.id]);
@@ -188,6 +192,12 @@ const Events: React.FC = () => {
       setSimulatingTime(false);
   };
 
+  const handleStartVoiceDebate = () => {
+      if (!activeEvent || !activeEvent.winnerTmdbId) return;
+      const winnerTitle = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId)?.title || "la película";
+      startLiveSession('debate', { movieTitle: winnerTitle, themeTitle: activeEvent.themeTitle });
+  };
+
   if (!activeEvent) {
       return (
           <div className="container mx-auto px-4 py-20 flex flex-col items-center justify-center text-center">
@@ -204,10 +214,13 @@ const Events: React.FC = () => {
   }
 
   const myVote = activeEvent.candidates.find(c => c.votes.includes(user?.id || ''));
-  const currentPhase = adminPreviewMode ? 'viewing' : activeEvent.phase;
+  // Determine phase based on real state AND simulations
+  const currentPhase = adminDebatePreview ? 'discussion' : (adminPreviewMode ? 'viewing' : activeEvent.phase);
+  
   let winner: EventCandidate | undefined | null = null;
   
-  if (adminPreviewMode) {
+  if (adminPreviewMode || adminDebatePreview) {
+      // In simulation, pick current winner
       if (activeEvent.candidates.length > 0) winner = activeEvent.candidates.reduce((prev, current) => (prev.votes.length > current.votes.length) ? prev : current);
   } else if (activeEvent.winnerTmdbId) {
       winner = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId);
@@ -223,7 +236,9 @@ const Events: React.FC = () => {
             <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-cine-dark/70 to-cine-dark"></div>
         </div>
         
-        {adminPreviewMode && <div className="fixed top-16 left-0 right-0 bg-blue-600/90 text-white text-center py-2 z-40 font-bold animate-pulse">👁️ MODO VISTA PREVIA (Solo Admin)</div>}
+        {/* Simulation Banners */}
+        {adminPreviewMode && !adminDebatePreview && <div className="fixed top-16 left-0 right-0 bg-blue-600/90 text-white text-center py-2 z-40 font-bold animate-pulse">👁️ MODO VISTA PREVIA: FASE PROYECCIÓN (Solo Admin)</div>}
+        {adminDebatePreview && <div className="fixed top-16 left-0 right-0 bg-purple-600/90 text-white text-center py-2 z-40 font-bold animate-pulse">👁️ MODO VISTA PREVIA: CINEFORUM DEBATE (Solo Admin)</div>}
 
         <div className="container mx-auto px-4 py-8 relative z-10 flex-grow flex flex-col">
             <div className="text-center mb-8 animate-fade-in relative flex-shrink-0">
@@ -257,6 +272,7 @@ const Events: React.FC = () => {
 
             {currentPhase === 'voting' && (
                 <div className="max-w-6xl mx-auto animate-fade-in pb-10">
+                    {/* Voting Content (Same as before) */}
                     <div className="bg-black/40 backdrop-blur-md border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6 shadow-lg">
                         <div className="flex-grow">
                              <div className="flex items-center gap-2 text-cine-gold font-bold text-lg mb-2"><Sparkles size={20}/> Elección de la Comunidad</div>
@@ -325,6 +341,7 @@ const Events: React.FC = () => {
                 <div className="max-w-5xl mx-auto animate-fade-in flex-grow flex flex-col relative">
                     {adminPreviewMode && <div className="absolute top-0 right-0 z-50"><button onClick={() => setAdminPreviewMode(false)} className="bg-white text-black font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2"><Eye size={18}/> Salir de Vista Previa</button></div>}
 
+                    {/* Viewing Content (Same as before) */}
                     <div className="text-center mb-10">
                         <Trophy className="text-cine-gold mx-auto mb-4 animate-bounce" size={64} />
                         <h2 className="text-3xl font-bold text-white mb-2">¡TENEMOS GANADORA!</h2>
@@ -338,7 +355,7 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Final Date Announcement or Cancellation Card (TV Show Style) */}
+                    {/* Final Date Announcement or Cancellation Card */}
                     {(activeEvent.finalDebateDate || adminTimePreview) && (
                         <div className={`mb-10 relative overflow-hidden p-8 rounded-2xl border-4 text-center animate-fade-in shadow-[0_0_80px_rgba(0,0,0,0.8)] ${adminTimePreview?.chosenTime === 'CANCELLED' ? 'bg-black border-red-600' : 'bg-black border-cine-gold'}`}>
                             {adminTimePreview?.chosenTime === 'CANCELLED' ? (
@@ -461,6 +478,9 @@ const Events: React.FC = () => {
                             <button onClick={handleSimulateTimeDecision} disabled={simulatingTime} className="bg-purple-900/40 text-purple-300 border border-purple-500 px-6 py-3 rounded-full font-bold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
                                 {simulatingTime ? <Loader2 className="animate-spin"/> : '👁️'} Admin: Simular Decisión de Hora (Con IA)
                             </button>
+                            <button onClick={() => setAdminDebatePreview(true)} className="bg-blue-600/40 text-blue-300 border border-blue-500 px-6 py-3 rounded-full font-bold hover:bg-blue-900 flex items-center gap-2">
+                                👁️ Admin: Simular Cineforum (Debate)
+                            </button>
                             <button onClick={handleStartDiscussion} disabled={startingDiscussion} className="bg-cine-gold text-black px-8 py-4 rounded-full font-bold hover:bg-white transition-colors flex items-center gap-2 disabled:opacity-50 shadow-[0_0_20px_rgba(212,175,55,0.3)]">
                                 {startingDiscussion ? <Loader2 className="animate-spin" size={20}/> : <MessageCircle size={20}/>}
                                 {startingDiscussion ? 'Preparando Sala...' : 'Admin: Iniciar Debate Ahora'}
@@ -471,13 +491,58 @@ const Events: React.FC = () => {
             )}
 
             {currentPhase === 'discussion' && (
-                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full backdrop-blur-sm bg-cine-gray/95">
+                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full backdrop-blur-sm bg-cine-gray/95 relative">
+                    
+                    {adminDebatePreview && <div className="absolute top-16 right-0 z-[60] bg-purple-600 text-white font-bold px-4 py-1 rounded-l-lg shadow-lg">Simulación Admin</div>}
+                    {adminDebatePreview && <button onClick={() => setAdminDebatePreview(false)} className="absolute top-16 left-0 z-[60] bg-white text-black font-bold px-4 py-1 rounded-r-lg shadow-lg">Salir Simulación</button>}
+
+                    {/* Visualizer and Pop-up for Voice Chat */}
+                    {liveSession.isConnected && (
+                        <div className="absolute top-0 inset-x-0 z-50 flex flex-col items-center pt-2 pointer-events-none">
+                            <div className="bg-black/80 backdrop-blur-md rounded-full px-6 py-2 border border-cine-gold/30 shadow-2xl flex items-center gap-4 pointer-events-auto">
+                                <div className="scale-50 -ml-4">
+                                    <AIVisualizer isUserSpeaking={liveSession.isUserSpeaking} isAiSpeaking={liveSession.isAiSpeaking} status="" size="sm" />
+                                </div>
+                                <span className="text-xs text-cine-gold font-bold uppercase tracking-wider">{liveSession.status}</span>
+                                <button onClick={stopLiveSession} className="bg-red-600 p-2 rounded-full text-white hover:bg-red-500 transition-colors"><PhoneOff size={14}/></button>
+                            </div>
+                            
+                            {/* Visual Content Pop-up */}
+                            {(liveSession.visualContent.length > 0 || liveSession.toolInUse) && (
+                                <div className="mt-2 w-72 max-h-[40vh] bg-black/90 backdrop-blur-xl border border-cine-gold/30 rounded-xl shadow-2xl overflow-y-auto custom-scrollbar p-3 animate-slide-in-top pointer-events-auto">
+                                    {liveSession.toolInUse && <div className="flex items-center gap-2 mb-2 text-xs text-cine-gold"><Loader2 size={10} className="animate-spin"/> {liveSession.toolInUse}</div>}
+                                    {liveSession.visualContent.map((item, idx) => (
+                                        <div key={idx} className="mb-3 last:mb-0">
+                                            {item.type === 'movie' ? <div className="transform scale-90 origin-top-left"><MovieCard movie={item.data} showRatingInput={false} /></div> : (
+                                                <div className="flex items-center gap-3 bg-cine-gray p-2 rounded-lg border border-gray-700">
+                                                    <img src={getImageUrl(item.data.profile_path, 'w200')} className="w-10 h-10 rounded-full object-cover" />
+                                                    <span className="text-xs text-white font-bold">{item.data.name}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                    <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div className="bg-black/40 p-4 border-b border-gray-800 flex justify-between items-center flex-shrink-0">
                          <div className="flex items-center gap-3">
                              <div className="relative"><MessageCircle className="text-cine-gold" size={24} /><span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse"></span></div>
                              <div><h3 className="font-bold text-white">Sala de Debate: En Vivo</h3><p className="text-xs text-gray-400">Moderado por IA</p></div>
                          </div>
-                         {user?.isAdmin && <button onClick={() => handleCallModerator()} disabled={modThinking} className="text-xs bg-cine-gold/20 text-cine-gold px-3 py-1 rounded border border-cine-gold/30 hover:bg-cine-gold/30 disabled:opacity-50">{modThinking ? 'IA Pensando...' : 'Invocar Moderadora'}</button>}
+                         <div className="flex items-center gap-2">
+                             {!liveSession.isConnected && (
+                                 <button 
+                                    onClick={handleStartVoiceDebate} 
+                                    className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-full font-bold flex items-center gap-2 shadow-[0_0_15px_rgba(22,163,74,0.4)] transition-all animate-pulse"
+                                 >
+                                     <Mic size={14}/> 🎙️ Entrar en Directo
+                                 </button>
+                             )}
+                             {user?.isAdmin && <button onClick={() => handleCallModerator()} disabled={modThinking} className="text-xs bg-cine-gold/20 text-cine-gold px-3 py-1 rounded border border-cine-gold/30 hover:bg-cine-gold/30 disabled:opacity-50">{modThinking ? 'IA Pensando...' : 'Invocar Moderadora'}</button>}
+                         </div>
                     </div>
                     <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4 space-y-4 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] custom-scrollbar">
                         {eventMessages.map(msg => {

@@ -4,6 +4,7 @@ import { useData } from '../context/DataContext';
 import { getMovieRecommendations, sendChatToGemini } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
 import MovieCard from '../components/MovieCard';
+import AIVisualizer from '../components/AIVisualizer';
 import { Sparkles, Loader2, AlertTriangle, Bot, Send, User as UserIcon, Mic, MicOff, Volume2, VolumeX, Zap, Phone, PhoneOff, Radio, Tv, X } from 'lucide-react';
 import { Movie, ChatMessage } from '../types';
 
@@ -123,7 +124,7 @@ const Recommendations: React.FC = () => {
                               Habla con la IA como si fuera una llamada real. Interrúmpela cuando quieras, no hace falta pulsar botones para hablar.
                           </p>
                           <button 
-                            onClick={startLiveSession}
+                            onClick={() => startLiveSession('general')}
                             className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3"
                           >
                               <Phone size={24} /> Iniciar Llamada
@@ -131,20 +132,13 @@ const Recommendations: React.FC = () => {
                       </div>
                   ) : (
                       <div className="text-center z-10 w-full flex flex-col items-center">
-                          <div className="mb-4 bg-black/40 px-4 py-2 rounded-full border border-gray-700 backdrop-blur-sm">
-                              <p className="text-cine-gold font-mono text-sm flex items-center gap-2">
-                                  <Radio size={14} className="animate-pulse"/> {liveSession.status}
-                              </p>
-                          </div>
-
-                          {/* Visualizer Circle */}
-                          <div className="relative w-64 h-64 flex items-center justify-center mb-8">
-                              <div className={`absolute inset-0 rounded-full border-4 transition-all duration-100 ${liveSession.isAiSpeaking ? 'border-cine-gold scale-110 opacity-100 shadow-[0_0_50px_rgba(212,175,55,0.6)]' : 'border-gray-800 scale-100 opacity-50'}`}></div>
-                              <div className={`absolute inset-4 rounded-full border-4 transition-all duration-100 ${liveSession.isUserSpeaking ? 'border-green-500 scale-105 opacity-100 shadow-[0_0_30px_rgba(34,197,94,0.5)]' : 'border-transparent scale-95 opacity-0'}`}></div>
-                              <div className="w-48 h-48 bg-black rounded-full flex items-center justify-center relative z-10 overflow-hidden shadow-2xl">
-                                  <img src="https://ui-avatars.com/api/?name=AI&background=000&color=d4af37&size=200" alt="AI" className="w-full h-full object-cover opacity-80" />
-                                  {liveSession.isAiSpeaking && <div className="absolute inset-0 bg-cine-gold/20 animate-pulse"></div>}
-                              </div>
+                          {/* NEW VISUALIZER */}
+                          <div className="mb-8 scale-125">
+                              <AIVisualizer 
+                                  isUserSpeaking={liveSession.isUserSpeaking}
+                                  isAiSpeaking={liveSession.isAiSpeaking}
+                                  status={liveSession.status}
+                              />
                           </div>
 
                           <div className="flex gap-4 mb-4">

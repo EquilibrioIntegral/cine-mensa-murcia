@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { generateSecurityQuiz, validateSecurityQuiz } from '../services/geminiService';
-import { Loader2, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, ShieldAlert, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 interface QuizModalProps {
   isOpen: boolean;
@@ -15,21 +16,27 @@ const QuizModal: React.FC<QuizModalProps> = ({ isOpen, onClose, movieTitle, onSu
   const [questions, setQuestions] = useState<{ question: string }[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [result, setResult] = useState<{ passed: boolean; reason: string } | null>(null);
+  const [quotaError, setQuotaError] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setLoading(true);
       setResult(null);
+      setQuotaError(false);
       setAnswers({});
       generateSecurityQuiz(movieTitle)
         .then(qs => {
             setQuestions(qs);
             setLoading(false);
         })
-        .catch(() => {
-            // Fallback just close if error
-            setLoading(false);
-            onClose();
+        .catch((err) => {
+            if (err.message === "API_QUOTA_EXCEEDED") {
+                setQuotaError(true);
+                setLoading(false);
+            } else {
+                setLoading(false);
+                onClose(); // Generic fail -> close
+            }
         });
     }
   }, [isOpen, movieTitle]);
@@ -51,7 +58,10 @@ const QuizModal: React.FC<QuizModalProps> = ({ isOpen, onClose, movieTitle, onSu
                 onSuccess();
             }, 2000);
         }
-    } catch (e) {
+    } catch (e: any) {
+        if (e.message === "API_QUOTA_EXCEEDED") {
+            setQuotaError(true);
+        }
         console.error(e);
     } finally {
         setValidating(false);
@@ -76,6 +86,20 @@ const QuizModal: React.FC<QuizModalProps> = ({ isOpen, onClose, movieTitle, onSu
                 <div className="text-center py-10">
                     <Loader2 className="animate-spin text-cine-gold mx-auto mb-4" size={32} />
                     <p className="text-gray-400">La IA está generando preguntas...</p>
+                </div>
+            ) : quotaError ? (
+                <div className="text-center py-8 animate-fade-in">
+                    <AlertTriangle className="text-red-500 mx-auto mb-4" size={64} />
+                    <h4 className="text-xl font-bold text-red-500 mb-4">¡Servicio Temporalmente No Disponible!</h4>
+                    <p className="text-white mb-6 font-bold bg-red-900/20 p-4 rounded border border-red-500/30">
+                        Cuota de Api de Gemini excedida temporalmente fuera de servicio
+                    </p>
+                    <button 
+                        onClick={onClose}
+                        className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded-full font-bold transition-colors"
+                    >
+                        Cerrar y reintentar más tarde
+                    </button>
                 </div>
             ) : result ? (
                  <div className="text-center py-8 animate-fade-in">

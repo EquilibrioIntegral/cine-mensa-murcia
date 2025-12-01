@@ -499,15 +499,94 @@ export const getParticipantGreeting = async (
     }
 };
 
-// --- REST OF FILE REMAINS UNCHANGED (Recommendations, Security Quiz, Chat) ---
+// --- RECOMMENDATIONS ---
+
 export const getMovieRecommendations = async (
   watchedMovies: Movie[],
   watchlistMovies: Movie[],
   userRatings: UserRating[],
   tmdbToken: string
 ): Promise<Movie[]> => {
-    // ... Placeholder implementation ...
-    return [];
+    if (!isAiAvailable()) return [];
+
+    const watchedTitles = watchedMovies.map(m => {
+        const rating = userRatings.find(r => r.movieId === m.id);
+        const detailed = rating?.detailed;
+        const score = detailed ? `(Guion:${detailed.script}, Disfrute:${detailed.enjoyment})` : '';
+        return `"${m.title}" ${score}`;
+    }).join(", ");
+
+    const pendingTitles = watchlistMovies.map(m => m.title).join(", ");
+
+    const prompt = `
+        Eres un experto cinéfilo.
+        El usuario ha visto: ${watchedTitles}.
+        Tiene pendientes: ${pendingTitles}.
+        
+        TAREA:
+        Recomienda 10 películas NUEVAS (que no estén ni vistas ni pendientes).
+        Basate en sus gustos (si valora guion, busca buen guion; si valora disfrute, busca entretenimiento).
+        
+        Formato JSON:
+        [
+            { "title": "Peli 1", "year": 1999, "reason": "Te gustará por..." },
+            ...
+        ]
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            title: { type: Type.STRING },
+                            year: { type: Type.INTEGER },
+                            reason: { type: Type.STRING }
+                        },
+                        required: ["title", "year", "reason"]
+                    }
+                }
+            }
+        });
+
+        if (!response.text) return [];
+        const rawRecs = JSON.parse(response.text);
+        
+        const recs: Movie[] = [];
+        // Carga paralela para velocidad
+        const promises = rawRecs.map(async (rec: any) => {
+            const tmdbData = await findMovieByTitleAndYear(rec.title, rec.year, tmdbToken);
+            if (tmdbData) {
+                return {
+                    id: `tmdb-${tmdbData.id}`,
+                    tmdbId: tmdbData.id,
+                    title: tmdbData.title,
+                    year: parseInt(tmdbData.release_date?.split('-')[0]) || rec.year,
+                    director: "IA",
+                    genre: [],
+                    posterUrl: getImageUrl(tmdbData.poster_path),
+                    description: tmdbData.overview,
+                    rating: tmdbData.vote_average,
+                    totalVotes: 0,
+                    recommendationReason: rec.reason
+                } as Movie;
+            }
+            return null;
+        });
+
+        const results = await Promise.all(promises);
+        return results.filter(r => r !== null) as Movie[];
+
+    } catch (e) {
+        console.error("Recs Error:", String(e));
+        return [];
+    }
 };
 
 export const sendChatToGemini = async (
@@ -518,16 +597,183 @@ export const sendChatToGemini = async (
     userRatings: UserRating[],
     tmdbToken: string
 ): Promise<{ text: string, movies: Movie[] }> => {
-    // ... Placeholder implementation ...
-    return { text: "Respuesta...", movies: [] };
+    if (!isAiAvailable()) return { text: "No puedo conectar con la IA.", movies: [] };
+
+    const watchedContext = watchedMovies.slice(0, 30).map(m => m.title).join(", ");
+    
+    const systemPrompt = `
+        Eres un experto en cine del club "Cine Mensa Murcia".
+        Usuario ha visto: ${watchedContext}.
+        
+        Responde a la pregunta del usuario sobre cine.
+        Si recomiendas películas específicas, DEBES incluir un bloque JSON oculto al final de tu respuesta con los títulos y años.
+        
+        Formato de respuesta:
+        Texto normal de la respuesta con tu opinión, datos, etc.
+        
+        \`\`\`json
+        [ { "title": "Peli A", "year": 2000 }, ... ]
+        \`\`\`
+    `;
+
+    const chatHistory = history.map(h => ({ role: h.role, parts: [{ text: h.text }] }));
+    chatHistory.push({ role: 'user', parts: [{ text: newMessage }] });
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: systemPrompt }] }, ...chatHistory],
+        });
+
+        const text = response.text || "";
+        
+        // Extract JSON
+        let movies: Movie[] = [];
+        const jsonMatch = text.match(/```json\s*(\[\s*[\s\S]*?\s*\])\s*```/);
+        
+        let cleanText = text;
+        
+        if (jsonMatch) {
+            cleanText = text.replace(jsonMatch[0], '').trim();
+            try {
+                const rawMovies = JSON.parse(jsonMatch[1]);
+                const promises = rawMovies.map(async (m: any) => {
+                    const tmdb = await findMovieByTitleAndYear(m.title, m.year, tmdbToken);
+                    if (tmdb) {
+                        return {
+                            id: `tmdb-${tmdb.id}`,
+                            tmdbId: tmdb.id,
+                            title: tmdb.title,
+                            year: parseInt(tmdb.release_date?.split('-')[0]) || 0,
+                            posterUrl: getImageUrl(tmdb.poster_path),
+                            rating: tmdb.vote_average,
+                            description: tmdb.overview,
+                            genre: [],
+                            director: "IA",
+                            totalVotes: 0
+                        } as Movie;
+                    }
+                    return null;
+                });
+                const results = await Promise.all(promises);
+                movies = results.filter(m => m !== null) as Movie[];
+            } catch (e) {
+                console.error("Chat JSON Error:", String(e));
+            }
+        }
+
+        return { text: cleanText, movies };
+
+    } catch (e) {
+        console.error("Chat Error:", String(e));
+        return { text: "Error al procesar tu mensaje.", movies: [] };
+    }
 };
 
+// --- SECURITY QUIZ LOGIC ---
+
 export const generateSecurityQuiz = async (movieTitle: string): Promise<{ question: string }[]> => {
-    // ... Placeholder implementation ...
-    return [];
+    if (!isAiAvailable()) return [];
+
+    const prompt = `
+        Genera 5 preguntas cortas y concretas sobre la trama de la película "${movieTitle}" para verificar si alguien la ha visto.
+        
+        REGLAS:
+        - Pregunta sobre el final, el destino del protagonista, o giros clave de la trama.
+        - NO preguntes detalles triviales imposibles de recordar (colores de ropa, matrículas, fechas exactas).
+        - Deben ser hechos memorables que cualquier espectador atento recordaría.
+        
+        Formato JSON array:
+        [ { "question": "¿Qué descubre el protagonista en el sótano?" }, ... ]
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            question: { type: Type.STRING }
+                        },
+                        required: ["question"]
+                    }
+                }
+            }
+        });
+
+        if (!response.text) return [];
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Quiz Gen Error:", String(e));
+        
+        // CHECK FOR QUOTA ERROR
+        if (String(e).includes("429") || String(e).includes("quota") || String(e).includes("exhausted")) {
+            throw new Error("API_QUOTA_EXCEEDED");
+        }
+
+        // Fallback for OTHER errors (network, generic)
+        return [
+            { question: "¿Cómo termina la película? Describe la escena final." },
+            { question: "¿Cuál es el conflicto principal que enfrenta el protagonista?" },
+            { question: "Menciona una escena memorable que te haya impactado." },
+            { question: "¿Quién es el personaje antagonista o villano?" },
+            { question: "¿Qué actor o actriz realiza la mejor interpretación?" }
+        ];
+    }
 };
 
 export const validateSecurityQuiz = async (movieTitle: string, qa: any[]): Promise<{ passed: boolean, reason: string }> => {
-    // ... Placeholder implementation ...
-    return { passed: true, reason: "" };
+    if (!isAiAvailable()) return { passed: true, reason: "IA no disponible, aprobado por defecto." };
+
+    const prompt = `
+        Actúa como un profesor de cine estricto pero justo.
+        Estamos verificando si un usuario ha visto la película "${movieTitle}".
+        
+        Aquí están las preguntas y sus respuestas:
+        ${JSON.stringify(qa)}
+        
+        TAREA:
+        Evalúa si las respuestas demuestran conocimiento real de la trama.
+        - Sé flexible con faltas de ortografía o nombres inexactos si se entiende la idea.
+        - Si responde "no sé" a la mayoría, déjalo en blanco o inventa cosas claramente falsas, SUSPENDE.
+        - Se necesitan al menos 3 respuestas razonablemente correctas para aprobar.
+        
+        Devuelve JSON:
+        { "passed": boolean, "reason": "Breve explicación del veredicto para el usuario" }
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        passed: { type: Type.BOOLEAN },
+                        reason: { type: Type.STRING }
+                    },
+                    required: ["passed", "reason"]
+                }
+            }
+        });
+
+        if (!response.text) return { passed: true, reason: "Error de IA, aprobado." };
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Quiz Validate Error:", String(e));
+        
+        // CHECK FOR QUOTA ERROR
+        if (String(e).includes("429") || String(e).includes("quota") || String(e).includes("exhausted")) {
+            throw new Error("API_QUOTA_EXCEEDED");
+        }
+
+        return { passed: true, reason: "Error técnico, aprobado." };
+    }
 };

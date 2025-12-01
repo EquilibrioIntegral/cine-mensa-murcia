@@ -72,7 +72,7 @@ interface DataContextType {
   
   // Live Session Global State
   liveSession: LiveSessionState;
-  startLiveSession: () => Promise<void>;
+  startLiveSession: (mode: 'general' | 'debate', contextData?: any) => Promise<void>;
   stopLiveSession: () => void;
 
   setTmdbToken: (token: string) => Promise<void>;
@@ -165,24 +165,48 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   };
 
-  const startLiveSession = async () => {
+  const startLiveSession = async (mode: 'general' | 'debate', contextData?: any) => {
       if (!user) return;
       
       try {
           setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...', visualContent: [] }));
 
-          const watchedTitles = movies.filter(m => user.watchedMovies.includes(m.id)).map(m => m.title).join(", ");
-          const systemInstruction = `
-            Eres un experto en cine del club "Cine Mensa Murcia". Estás en una llamada de voz en tiempo real con el socio ${user.name}.
-            DATOS: Ha visto: ${watchedTitles.slice(0, 500)}...
-            OBJETIVO: Conversación natural, fluida y divertida. Respuestas BREVES (1-3 frases).
-            
-            HERRAMIENTAS VISUALES (PANTALLA COMPARTIDA):
-            - Tienes una PANTALLA COMPARTIDA con el usuario. ÚSALA CONSTANTEMENTE.
-            - Si mencionas una PELÍCULA -> Ejecuta "show_movie(titulo)".
-            - Si mencionas un ACTOR o DIRECTOR -> Ejecuta "show_person(nombre)".
-            - ¡Es obligatorio! Muestra el contenido visualmente.
-          `;
+          let systemInstruction = '';
+
+          // MODE: RECOMMENDATIONS
+          if (mode === 'general') {
+              const watchedTitles = movies.filter(m => user.watchedMovies.includes(m.id)).map(m => m.title).join(", ");
+              systemInstruction = `
+                Eres un experto en cine del club "Cine Mensa Murcia". Estás en una llamada de voz en tiempo real con el socio ${user.name}.
+                DATOS: Ha visto: ${watchedTitles.slice(0, 500)}...
+                OBJETIVO: Conversación natural, fluida y divertida. Respuestas BREVES (1-3 frases).
+                
+                HERRAMIENTAS VISUALES (PANTALLA COMPARTIDA):
+                - Tienes una PANTALLA COMPARTIDA con el usuario. ÚSALA CONSTANTEMENTE.
+                - Si mencionas una PELÍCULA -> Ejecuta "show_movie(titulo)".
+                - Si mencionas un ACTOR o DIRECTOR -> Ejecuta "show_person(nombre)".
+                - ¡Es obligatorio! Muestra el contenido visualmente.
+              `;
+          } 
+          // MODE: CINEFORUM DEBATE MODERATOR
+          else if (mode === 'debate') {
+              const { movieTitle, themeTitle } = contextData || { movieTitle: 'La película', themeTitle: 'General' };
+              systemInstruction = `
+                Eres la PRESENTADORA ESTRELLA de TV del programa "Cine Mensa Murcia".
+                Estás en una tertulia en vivo con el socio ${user.name} sobre la película: "${movieTitle}" (Tema: ${themeTitle}).
+                
+                TU ROL:
+                - Moderar la charla, lanzar preguntas interesantes sobre la trama, el guion o los actores.
+                - Ser carismática, usar humor inteligente y tono de "Showwoman".
+                - HABLA POCO: Tus intervenciones deben ser cortas (1-2 frases) para dejar hablar al usuario.
+                - ESPAÑOL NEUTRO INTERNACIONAL (Sin localismos de Murcia).
+                
+                HERRAMIENTAS VISUALES:
+                - Si hablas de un actor o una escena, ¡ÚSALAS!
+                - show_person(nombre) para mostrar actores.
+                - show_movie(titulo) para referenciar otras pelis.
+              `;
+          }
 
           const tools = [{
             functionDeclarations: [
