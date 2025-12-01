@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon } from 'lucide-react';
-import { enhanceNewsContent, generateCinemaNews } from '../services/geminiService';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench } from 'lucide-react';
+import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 
 const AdminPanel: React.FC = () => {
   const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews } = useData();
@@ -18,6 +18,11 @@ const AdminPanel: React.FC = () => {
   const [newsImageUrl, setNewsImageUrl] = useState('');
   const [newsSent, setNewsSent] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Manual Update State (Feedback Tab)
+  const [updateDraft, setUpdateDraft] = useState('');
+  const [updateTitle, setUpdateTitle] = useState('');
+  const [updateContent, setUpdateContent] = useState('');
 
   // World News State
   const [generatedNews, setGeneratedNews] = useState<{ title: string, content: string, visualPrompt: string }[]>([]);
@@ -66,6 +71,33 @@ const AdminPanel: React.FC = () => {
       } finally {
           setAiLoading(false);
       }
+  };
+
+  // --- UPDATE HANDLING ---
+
+  const handleEnhanceUpdate = async () => {
+      if (!updateDraft) return;
+      setAiLoading(true);
+      try {
+          const result = await enhanceUpdateContent(updateDraft);
+          if (result) {
+              setUpdateTitle(result.title);
+              setUpdateContent(result.content);
+          }
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setAiLoading(false);
+      }
+  };
+
+  const handlePublishManualUpdate = async () => {
+      if (!updateTitle || !updateContent) return;
+      await publishNews(updateTitle, updateContent, 'update');
+      setUpdateDraft('');
+      setUpdateTitle('');
+      setUpdateContent('');
+      alert("¡Mejora publicada en el Registro de Cambios!");
   };
 
   const handleGenerateWorldNews = async () => {
@@ -132,26 +164,75 @@ const AdminPanel: React.FC = () => {
 
       {/* FEEDBACK TAB */}
       {activeTab === 'feedback' && (
-          <div className="space-y-4">
-              {pendingFeedback.length === 0 ? <p className="text-gray-500">No hay feedback pendiente.</p> : pendingFeedback.map(fb => (
-                  <div key={fb.id} className="bg-cine-gray p-4 rounded-xl border border-gray-800">
-                      <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
-                              {fb.type === 'bug' ? <Bug className="text-red-500" size={18}/> : <Shield className="text-yellow-500" size={18}/>}
-                              <span className="font-bold text-white uppercase text-sm">{fb.type}</span>
-                              <span className="text-gray-500 text-xs">• {fb.userName}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* LEFT: USER FEEDBACK */}
+              <div className="space-y-4">
+                  <h3 className="font-bold text-white mb-2 text-lg">Reportes de Usuarios</h3>
+                  {pendingFeedback.length === 0 ? <p className="text-gray-500 bg-cine-gray p-6 rounded-xl border border-gray-800">No hay feedback pendiente.</p> : pendingFeedback.map(fb => (
+                      <div key={fb.id} className="bg-cine-gray p-4 rounded-xl border border-gray-800">
+                          <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-center gap-2">
+                                  {fb.type === 'bug' ? <Bug className="text-red-500" size={18}/> : <Shield className="text-yellow-500" size={18}/>}
+                                  <span className="font-bold text-white uppercase text-sm">{fb.type}</span>
+                                  <span className="text-gray-500 text-xs">• {fb.userName}</span>
+                              </div>
+                              <span className="text-gray-600 text-xs">{new Date(fb.timestamp).toLocaleDateString()}</span>
                           </div>
-                          <span className="text-gray-600 text-xs">{new Date(fb.timestamp).toLocaleDateString()}</span>
+                          <p className="text-gray-300 mb-4 bg-black/30 p-3 rounded">{fb.text}</p>
+                          <div className="flex justify-end gap-3">
+                              <button onClick={() => deleteFeedback(fb.id)} className="text-red-400 hover:text-white"><Trash2 size={18}/></button>
+                              <button onClick={() => resolveFeedback(fb.id)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2">
+                                  <Check size={16}/> Marcar Solucionado y Publicar
+                              </button>
+                          </div>
                       </div>
-                      <p className="text-gray-300 mb-4 bg-black/30 p-3 rounded">{fb.text}</p>
-                      <div className="flex justify-end gap-3">
-                          <button onClick={() => deleteFeedback(fb.id)} className="text-red-400 hover:text-white"><Trash2 size={18}/></button>
-                          <button onClick={() => resolveFeedback(fb.id)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2">
-                              <Check size={16}/> Marcar Solucionado y Publicar
+                  ))}
+              </div>
+
+              {/* RIGHT: MANUAL UPDATE PUBLISHER */}
+              <div className="bg-cine-gray p-6 rounded-xl border border-gray-800 h-fit">
+                  <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Wrench className="text-blue-400"/> Registro de Cambios Manual</h3>
+                  <p className="text-gray-400 text-sm mb-4">¿Has arreglado o mejorado algo por tu cuenta? Publícalo aquí.</p>
+                  
+                  <textarea 
+                      value={updateDraft}
+                      onChange={(e) => setUpdateDraft(e.target.value)}
+                      placeholder="Ej: He arreglado el fallo del login y ahora va más rápido..."
+                      className="w-full h-24 bg-black/50 border border-gray-600 rounded p-3 text-white mb-3 focus:border-cine-gold outline-none text-sm"
+                  />
+                  
+                  <button 
+                      onClick={handleEnhanceUpdate}
+                      disabled={aiLoading || !updateDraft}
+                      className="w-full mb-6 bg-blue-900/50 hover:bg-blue-900 text-blue-200 p-2 rounded-lg border border-blue-500/30 flex items-center justify-center gap-2 text-sm font-bold transition-colors disabled:opacity-50"
+                  >
+                       {aiLoading ? <Loader2 className="animate-spin" size={16}/> : <Wand2 size={16}/>} Redactar mejora con IA
+                  </button>
+
+                  {(updateTitle || updateContent) && (
+                      <div className="space-y-3 animate-fade-in border-t border-gray-700 pt-4">
+                          <input 
+                              type="text" 
+                              value={updateTitle}
+                              onChange={(e) => setUpdateTitle(e.target.value)}
+                              className="w-full bg-black/50 border border-gray-600 rounded p-2 text-white font-bold"
+                              placeholder="Título final..."
+                          />
+                          <textarea 
+                              value={updateContent}
+                              onChange={(e) => setUpdateContent(e.target.value)}
+                              className="w-full bg-black/50 border border-gray-600 rounded p-2 text-white text-sm"
+                              placeholder="Contenido final..."
+                          />
+                          <button 
+                              onClick={handlePublishManualUpdate}
+                              className="w-full bg-green-600 text-white font-bold py-2 rounded hover:bg-green-500 transition-colors"
+                          >
+                              Publicar Mejora
                           </button>
                       </div>
-                  </div>
-              ))}
+                  )}
+              </div>
           </div>
       )}
 

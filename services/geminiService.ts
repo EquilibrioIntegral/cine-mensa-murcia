@@ -57,6 +57,49 @@ export const enhanceNewsContent = async (draft: string): Promise<{ title: string
     }
 };
 
+export const enhanceUpdateContent = async (draft: string): Promise<{ title: string, content: string } | null> => {
+    if (!isAiAvailable()) return null;
+
+    const prompt = `
+        Eres el Jefe de Producto Técnico de la app "Cine Mensa Murcia".
+        El desarrollador te ha pasado esta nota rápida sobre un cambio o arreglo:
+        "${draft}"
+
+        TU TAREA:
+        Redactar una entrada para el "Registro de Cambios" (Changelog) que verán los usuarios.
+        
+        1. Título: Corto, con un emoji al principio (ej: 🐛, ✨, 🚀, 🛠️) y descriptivo.
+        2. Contenido: Explicación profesional pero amigable de qué ha mejorado para el usuario. Máximo 2 frases.
+
+        Devuelve JSON exacto:
+        { "title": "...", "content": "..." }
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: { type: Type.STRING },
+                        content: { type: Type.STRING }
+                    },
+                    required: ["title", "content"]
+                }
+            }
+        });
+        
+        if (!response.text) return null;
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Update Enhance Error:", String(e));
+        return null;
+    }
+};
+
 export const generateCinemaNews = async (): Promise<{ title: string, content: string, visualPrompt: string }[]> => {
     if (!isAiAvailable()) return [];
 
@@ -89,7 +132,7 @@ export const generateCinemaNews = async (): Promise<{ title: string, content: st
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.0-flash",
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
                 tools: [{ googleSearch: {} }],
