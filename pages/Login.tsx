@@ -2,7 +2,6 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Film, X, Mail } from 'lucide-react';
-import AvatarSelector from '../components/AvatarSelector';
 
 const Login: React.FC = () => {
   const { login, register, resetPassword } = useData();
@@ -10,7 +9,6 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [selectedAvatar, setSelectedAvatar] = useState('');
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -42,7 +40,8 @@ const Login: React.FC = () => {
                 setLoading(false);
                 return;
             }
-            const result = await register(email, name, password, selectedAvatar);
+            // Eliminado el paso del avatar. Se generará automático en DataContext.
+            const result = await register(email, name, password);
             setMessage({ type: result.success ? 'success' : 'error', text: result.message });
             if (result.success && !result.message.includes('Administrador')) {
                 // Stay on screen to show "Pending approval" message
@@ -119,7 +118,6 @@ const Login: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
             {isRegistering && (
-                <>
                 <div>
                     <label className="block text-xs text-gray-400 uppercase font-bold mb-1">Nombre</label>
                     <input 
@@ -130,13 +128,8 @@ const Login: React.FC = () => {
                         placeholder="Tu nombre cinéfilo"
                         required={isRegistering}
                     />
+                    <p className="text-[10px] text-gray-500 mt-1 italic">*Podrás personalizar tu foto de perfil una vez dentro.</p>
                 </div>
-                <div>
-                    <label className="block text-xs text-gray-400 uppercase font-bold mb-2">Elige tu Avatar</label>
-                    <AvatarSelector currentAvatar={selectedAvatar} onSelect={setSelectedAvatar} />
-                    {!selectedAvatar && <p className="text-xs text-yellow-500 mt-1">Selecciona una imagen</p>}
-                </div>
-                </>
             )}
             <div>
                 <label className="block text-xs text-gray-400 uppercase font-bold mb-1">Email</label>
@@ -175,7 +168,7 @@ const Login: React.FC = () => {
 
             <button 
                 type="submit"
-                disabled={loading || (isRegistering && !selectedAvatar)}
+                disabled={loading}
                 className="w-full bg-cine-gold text-black font-bold py-3 rounded hover:bg-white transition-colors mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 {loading ? 'Procesando...' : (isRegistering ? 'Solicitar Registro' : 'Entrar al Cine')}
