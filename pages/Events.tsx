@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit } from 'lucide-react';
 import { EventCandidate } from '../types';
 
 const Events: React.FC = () => {
@@ -26,18 +26,30 @@ const Events: React.FC = () => {
       }
   }, [eventMessages, modThinking]);
 
+  // Reset personalization when event changes
+  useEffect(() => {
+      setPersonalizedReasons({});
+  }, [activeEvent?.id]);
+
   // Effect to load personalized reasons when entering voting phase
   useEffect(() => {
       const loadPersonalization = async () => {
           if (activeEvent?.phase === 'voting' && user && activeEvent.candidates.length > 0) {
-              const newReasons: Record<number, string> = {};
-              // Only do this if we haven't loaded them yet to save API calls
-              if (Object.keys(personalizedReasons).length === 0) {
-                  for (const candidate of activeEvent.candidates) {
+              
+              // Iterate and fetch one by one to show progress
+              for (const candidate of activeEvent.candidates) {
+                  // Skip if already loaded
+                  if (personalizedReasons[candidate.tmdbId]) continue;
+
+                  try {
                       const personal = await personalizeCandidateReason(candidate.title, candidate.reason, userRatings, movies);
-                      newReasons[candidate.tmdbId] = personal;
+                      setPersonalizedReasons(prev => ({
+                          ...prev,
+                          [candidate.tmdbId]: personal
+                      }));
+                  } catch (e) {
+                      console.error("Error personalizing reason:", String(e));
                   }
-                  setPersonalizedReasons(newReasons);
               }
           }
       };
@@ -311,6 +323,11 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
+                    <p className="text-center text-gray-300 text-sm mb-8 italic max-w-2xl mx-auto bg-black/30 p-4 rounded-full border border-cine-gold/30">
+                        <BrainCircuit size={16} className="inline mr-2 text-cine-gold"/>
+                        Estas candidatas han sido seleccionadas por la <strong>IA de Cine Mensa</strong> analizando el historial y los gustos de <strong>todo el grupo</strong>.
+                    </p>
+
                     <h2 className="text-2xl font-black text-white text-center mb-8 tracking-widest uppercase border-b border-gray-800 pb-4 drop-shadow-md">
                         <span className="text-cine-gold">///</span> Candidatas Oficiales
                     </h2>
@@ -322,7 +339,7 @@ const Events: React.FC = () => {
                                 ? Math.round((candidate.votes.length / totalVotes) * 100) 
                                 : 0;
                             const isSelected = myVote?.tmdbId === candidate.tmdbId;
-                            const displayReason = personalizedReasons[candidate.tmdbId] || candidate.reason;
+                            const personalReason = personalizedReasons[candidate.tmdbId];
 
                             return (
                                 <div key={candidate.tmdbId} className={`group relative rounded-2xl overflow-hidden border-2 transition-all cursor-pointer flex flex-col bg-cine-gray ${isSelected ? 'border-cine-gold shadow-[0_0_30px_rgba(212,175,55,0.4)] scale-105 z-10' : 'border-gray-800 hover:border-gray-500 shadow-xl'}`}
@@ -342,14 +359,27 @@ const Events: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="p-5 flex flex-col flex-grow bg-cine-gray">
-                                        <div className="mb-6 flex-grow">
-                                            {personalizedReasons[candidate.tmdbId] ? (
-                                                <p className="text-xs text-cine-gold font-bold uppercase mb-2 flex items-center gap-1 tracking-wider"><UserCheck size={14}/> Para ti:</p>
-                                            ) : (
+                                        <div className="mb-6 flex-grow space-y-4">
+                                            {/* 1. Generic Reason (The Pitch) */}
+                                            <div>
                                                 <p className="text-xs text-gray-500 font-bold uppercase mb-2 tracking-wider">La Propuesta:</p>
-                                            )}
-                                            {/* Removed line-clamp to show full text */}
-                                            <p className="text-gray-300 italic leading-relaxed text-sm">"{displayReason}"</p>
+                                                <p className="text-gray-300 text-sm leading-relaxed">"{candidate.reason}"</p>
+                                            </div>
+
+                                            {/* 2. Personalized Reason (The Hook) - ALWAYS SHOW with Loader if needed */}
+                                            <div className="bg-cine-gold/5 border-l-2 border-cine-gold pl-3 py-2 rounded-r-lg mt-3">
+                                                <p className="text-xs text-cine-gold font-bold uppercase mb-2 flex items-center gap-1 tracking-wider">
+                                                    <UserCheck size={14}/> Para ti:
+                                                </p>
+                                                {personalReason ? (
+                                                     <p className="text-gray-200 italic text-sm leading-relaxed animate-fade-in">"{personalReason}"</p>
+                                                ) : (
+                                                     <div className="flex items-center gap-2 text-gray-500 italic text-sm py-1">
+                                                         <Loader2 size={14} className="animate-spin text-cine-gold"/>
+                                                         <span>IA analizando tus gustos...</span>
+                                                     </div>
+                                                )}
+                                            </div>
                                         </div>
                                         
                                         <div className="mt-auto pt-4 border-t border-gray-800">
