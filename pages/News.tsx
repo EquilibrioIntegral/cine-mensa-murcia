@@ -67,12 +67,19 @@ const News: React.FC = () => {
                           <div className="p-8 text-center text-gray-500 italic">No hay noticias recientes.</div>
                       ) : (
                           generalNews.map(item => (
-                              <div key={item.id} className="p-6 hover:bg-white/5 transition-colors">
-                                  <div className="flex justify-between items-start mb-2">
-                                      <h4 className="font-bold text-white text-lg">{item.title}</h4>
-                                      <span className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleDateString()}</span>
+                              <div key={item.id} className="hover:bg-white/5 transition-colors">
+                                  {item.imageUrl && (
+                                      <div className="w-full h-48 overflow-hidden">
+                                          <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
+                                      </div>
+                                  )}
+                                  <div className="p-6">
+                                      <div className="flex justify-between items-start mb-2">
+                                          <h4 className="font-bold text-white text-lg">{item.title}</h4>
+                                          <span className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleDateString()}</span>
+                                      </div>
+                                      <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{item.content}</p>
                                   </div>
-                                  <p className="text-gray-300 leading-relaxed">{item.content}</p>
                               </div>
                           ))
                       )}

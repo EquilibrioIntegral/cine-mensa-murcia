@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon } from 'lucide-react';
+import { enhanceNewsContent, generateCinemaNews } from '../services/geminiService';
 
 const AdminPanel: React.FC = () => {
   const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews } = useData();
@@ -14,7 +15,12 @@ const AdminPanel: React.FC = () => {
   // News State
   const [newsTitle, setNewsTitle] = useState('');
   const [newsContent, setNewsContent] = useState('');
+  const [newsImageUrl, setNewsImageUrl] = useState('');
   const [newsSent, setNewsSent] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // World News State
+  const [generatedNews, setGeneratedNews] = useState<{ title: string, content: string, visualPrompt: string }[]>([]);
 
   const pendingUsers = allUsers.filter(u => u.status === 'pending');
   const pendingFeedback = feedbackList.filter(f => f.status === 'pending');
@@ -36,11 +42,50 @@ const AdminPanel: React.FC = () => {
   const handlePublishNews = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!newsTitle || !newsContent) return;
-      await publishNews(newsTitle, newsContent, 'general');
+      await publishNews(newsTitle, newsContent, 'general', newsImageUrl);
       setNewsTitle('');
       setNewsContent('');
+      setNewsImageUrl('');
       setNewsSent(true);
       setTimeout(() => setNewsSent(false), 3000);
+  };
+
+  const handleEnhanceNews = async () => {
+      if (!newsContent) return;
+      setAiLoading(true);
+      try {
+          const result = await enhanceNewsContent(newsContent);
+          if (result) {
+              setNewsTitle(result.title);
+              setNewsContent(result.content);
+              const img = `https://image.pollinations.ai/prompt/${encodeURIComponent(result.visualPrompt)}?nologo=true&width=800&height=400`;
+              setNewsImageUrl(img);
+          }
+      } catch(e) {
+          console.error(e);
+      } finally {
+          setAiLoading(false);
+      }
+  };
+
+  const handleGenerateWorldNews = async () => {
+      setAiLoading(true);
+      try {
+          const news = await generateCinemaNews();
+          setGeneratedNews(news);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setAiLoading(false);
+      }
+  };
+
+  const handleSelectGeneratedNews = (newsItem: { title: string, content: string, visualPrompt: string }) => {
+      setNewsTitle(newsItem.title);
+      setNewsContent(newsItem.content);
+      const img = `https://image.pollinations.ai/prompt/${encodeURIComponent(newsItem.visualPrompt)}?nologo=true&width=800&height=400`;
+      setNewsImageUrl(img);
+      setGeneratedNews([]); // Clear selection
   };
 
   return (
@@ -54,7 +99,7 @@ const AdminPanel: React.FC = () => {
       <div className="flex flex-wrap gap-4 mb-8">
           <button onClick={() => setActiveTab('users')} className={`px-4 py-2 rounded-lg font-bold ${activeTab === 'users' ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>Socios</button>
           <button onClick={() => setActiveTab('feedback')} className={`px-4 py-2 rounded-lg font-bold ${activeTab === 'feedback' ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>Feedback ({pendingFeedback.length})</button>
-          <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg font-bold ${activeTab === 'news' ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>Publicar Noticias</button>
+          <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg font-bold ${activeTab === 'news' ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>Redacción (IA)</button>
           <button onClick={() => setActiveTab('config')} className={`px-4 py-2 rounded-lg font-bold ${activeTab === 'config' ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>Configuración</button>
       </div>
 
@@ -110,27 +155,93 @@ const AdminPanel: React.FC = () => {
           </div>
       )}
 
-      {/* NEWS TAB */}
+      {/* NEWS EDITOR TAB */}
       {activeTab === 'news' && (
-          <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
-              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Megaphone className="text-cine-gold"/> Publicar Noticia Global</h3>
-              <form onSubmit={handlePublishNews} className="space-y-4">
-                  <input 
-                    type="text" 
-                    placeholder="Título del anuncio..." 
-                    className="w-full bg-black/50 border border-gray-600 p-3 rounded text-white"
-                    value={newsTitle}
-                    onChange={e => setNewsTitle(e.target.value)}
-                  />
-                  <textarea 
-                    placeholder="Contenido..." 
-                    className="w-full h-32 bg-black/50 border border-gray-600 p-3 rounded text-white"
-                    value={newsContent}
-                    onChange={e => setNewsContent(e.target.value)}
-                  />
-                  <button type="submit" className="bg-cine-gold text-black px-6 py-2 rounded font-bold">Publicar</button>
-                  {newsSent && <span className="text-green-500 ml-4">¡Publicado!</span>}
-              </form>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              
+              {/* EDITOR COLUMN */}
+              <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
+                  <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Megaphone className="text-cine-gold"/> Redactor Jefe</h3>
+                  
+                  <div className="flex gap-2 mb-4">
+                      <button 
+                        onClick={handleEnhanceNews}
+                        disabled={aiLoading || !newsContent}
+                        className="flex-1 bg-purple-900/50 hover:bg-purple-900 text-purple-200 p-3 rounded-lg border border-purple-500/30 flex items-center justify-center gap-2 text-sm font-bold transition-colors disabled:opacity-50"
+                      >
+                          {aiLoading ? <Loader2 className="animate-spin" size={16}/> : <Wand2 size={16}/>}
+                          Mejorar con IA + Imagen
+                      </button>
+                      <button 
+                        onClick={handleGenerateWorldNews}
+                        disabled={aiLoading}
+                        className="flex-1 bg-blue-900/50 hover:bg-blue-900 text-blue-200 p-3 rounded-lg border border-blue-500/30 flex items-center justify-center gap-2 text-sm font-bold transition-colors disabled:opacity-50"
+                      >
+                          {aiLoading ? <Loader2 className="animate-spin" size={16}/> : <Globe size={16}/>}
+                          Buscar Actualidad Cine
+                      </button>
+                  </div>
+
+                  <form onSubmit={handlePublishNews} className="space-y-4">
+                      <input 
+                        type="text" 
+                        placeholder="Título del titular..." 
+                        className="w-full bg-black/50 border border-gray-600 p-3 rounded text-white focus:border-cine-gold outline-none"
+                        value={newsTitle}
+                        onChange={e => setNewsTitle(e.target.value)}
+                      />
+                      <textarea 
+                        placeholder="Escribe un borrador rápido y pulsa 'Mejorar con IA'..." 
+                        className="w-full h-48 bg-black/50 border border-gray-600 p-3 rounded text-white focus:border-cine-gold outline-none"
+                        value={newsContent}
+                        onChange={e => setNewsContent(e.target.value)}
+                      />
+                      
+                      {newsImageUrl && (
+                          <div className="relative group">
+                              <img src={newsImageUrl} alt="Preview" className="w-full h-32 object-cover rounded-lg border border-gray-600" />
+                              <button 
+                                type="button" 
+                                onClick={() => setNewsImageUrl('')}
+                                className="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                  <X size={14} />
+                              </button>
+                              <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-gray-300 flex items-center gap-1">
+                                  <ImageIcon size={12}/> Imagen IA
+                              </div>
+                          </div>
+                      )}
+
+                      <button type="submit" className="w-full bg-cine-gold text-black px-6 py-3 rounded font-bold hover:bg-white transition-colors">
+                          Publicar Noticia
+                      </button>
+                      {newsSent && <p className="text-green-500 text-center font-bold">¡Publicado en portada!</p>}
+                  </form>
+              </div>
+
+              {/* GENERATED CONTENT COLUMN */}
+              <div>
+                  {generatedNews.length > 0 && (
+                      <div className="space-y-4 animate-fade-in">
+                          <h4 className="text-gray-400 text-sm font-bold uppercase">Noticias de Actualidad Encontradas:</h4>
+                          {generatedNews.map((news, idx) => (
+                              <div key={idx} className="bg-black/40 p-4 rounded-xl border border-gray-700 hover:border-cine-gold transition-colors cursor-pointer group" onClick={() => handleSelectGeneratedNews(news)}>
+                                  <h5 className="font-bold text-white mb-2 group-hover:text-cine-gold">{news.title}</h5>
+                                  <p className="text-gray-400 text-sm line-clamp-2">{news.content}</p>
+                                  <button className="mt-3 text-xs bg-cine-gold/20 text-cine-gold px-3 py-1 rounded border border-cine-gold/30 font-bold w-full">Usar esta noticia</button>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+                  
+                  {generatedNews.length === 0 && !aiLoading && (
+                      <div className="bg-black/20 p-8 rounded-xl border border-dashed border-gray-800 text-center text-gray-500">
+                          <Globe className="mx-auto mb-3 opacity-20" size={48} />
+                          <p>Pulsa "Buscar Actualidad Cine" para generar noticias reales simuladas o escribe tu propio borrador.</p>
+                      </div>
+                  )}
+              </div>
           </div>
       )}
 

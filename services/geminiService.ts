@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
@@ -10,6 +11,111 @@ const ai = new GoogleGenAI({ apiKey });
 const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
 };
+
+// --- NEWS EDITOR AI ---
+
+export const enhanceNewsContent = async (draft: string): Promise<{ title: string, content: string, visualPrompt: string } | null> => {
+    if (!isAiAvailable()) return null;
+
+    const prompt = `
+        Eres el Redactor Jefe de "Cine Mensa Murcia".
+        Tienes el siguiente borrador de noticia escrito por un administrador:
+        "${draft}"
+
+        TU TAREA:
+        1. Reescribir el contenido para que suene profesional, épico y emocionante. Sin faltas de ortografía.
+        2. Crear un Título pegadizo (tipo titular de revista de cine).
+        3. Generar una descripción visual en INGLÉS para crear una imagen de cabecera con IA (ej: "cinema audience watching screen, dark atmosphere, golden light").
+
+        Devuelve JSON exacto:
+        { "title": "...", "content": "...", "visualPrompt": "..." }
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: { type: Type.STRING },
+                        content: { type: Type.STRING },
+                        visualPrompt: { type: Type.STRING }
+                    },
+                    required: ["title", "content", "visualPrompt"]
+                }
+            }
+        });
+        
+        if (!response.text) return null;
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("News Enhance Error:", String(e));
+        return null;
+    }
+};
+
+export const generateCinemaNews = async (): Promise<{ title: string, content: string, visualPrompt: string }[]> => {
+    if (!isAiAvailable()) return [];
+
+    const prompt = `
+        Utiliza la herramienta Google Search para buscar las noticias de cine más importantes y recientes de las últimas 24 HORAS.
+        Céntrate en:
+        - Resultados de taquilla del fin de semana.
+        - Nuevos trailers lanzados hoy/ayer.
+        - Premios recientes o festivales en curso.
+        - Declaraciones virales de directores o actores.
+        
+        Selecciona las 3 noticias más relevantes y redactalas para el club "Cine Mensa Murcia".
+        
+        Para cada noticia genera:
+        1. "title": Un titular periodístico en español atractivo.
+        2. "content": Un resumen de 2-3 frases en español.
+        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen (ej: "close up of actor X, cinematic lighting").
+
+        IMPORTANTE:
+        Devuelve la respuesta ESTRICTAMENTE como un JSON Array dentro de un bloque de código markdown json.
+        No añadidas texto fuera del bloque de código.
+        
+        Ejemplo de salida esperada:
+        \`\`\`json
+        [
+          { "title": "...", "content": "...", "visualPrompt": "..." }
+        ]
+        \`\`\`
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                tools: [{ googleSearch: {} }],
+                // Nota: responseSchema/responseMimeType no están permitidos con tools en esta versión del SDK,
+                // por lo que solicitamos JSON en el prompt y parseamos el texto.
+            }
+        });
+
+        const text = response.text || "";
+        
+        // Extraer JSON del bloque de código markdown si existe
+        const jsonMatch = text.match(/```json\s*(\[\s*[\s\S]*?\s*\])\s*```/) || text.match(/\[\s*[\s\S]*?\s*\]/);
+        
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        }
+        
+        console.warn("No se encontró JSON válido en la respuesta de noticias:", text);
+        return [];
+
+    } catch (e) {
+        console.error("News Gen Error:", String(e));
+        return [];
+    }
+};
+
 
 // --- CINEFORUM EVENT GENERATOR ---
 

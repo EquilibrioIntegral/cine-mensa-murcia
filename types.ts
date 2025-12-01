@@ -118,6 +118,7 @@ export interface NewsItem {
   content: string;
   type: 'general' | 'update' | 'event';
   timestamp: number;
+  imageUrl?: string; // Added support for news images
 }
 
 export interface AppFeedback {

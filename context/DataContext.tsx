@@ -60,7 +60,7 @@ interface DataContextType {
   // News & Feedback
   sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
   resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
-  publishNews: (title: string, content: string, type: 'general' | 'update') => Promise<void>;
+  publishNews: (title: string, content: string, type: 'general' | 'update', imageUrl?: string) => Promise<void>;
   deleteFeedback: (id: string) => Promise<void>;
 }
 
@@ -410,7 +410,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const closeEvent = async (eventId: string) => {
       if (!user?.isAdmin) return;
       try {
-          setActiveEvent(null);
+          setActiveEvent(null); // Optimistic UI update
           await updateDoc(doc(db, 'events', eventId), { phase: 'closed' });
       } catch (e) { console.error(String(e)); }
   };
@@ -485,10 +485,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (e) { console.error(String(e)); }
   };
 
-  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event') => {
+  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => {
       if (!user?.isAdmin) return;
       try {
-          const newsItem: Omit<NewsItem, 'id'> = { title, content, type, timestamp: Date.now() };
+          const newsItem: Omit<NewsItem, 'id'> = { 
+            title, 
+            content, 
+            type, 
+            timestamp: Date.now(),
+            ...(imageUrl && { imageUrl }) 
+          };
           await addDoc(collection(db, 'news'), newsItem);
       } catch (e) { console.error(String(e)); }
   };
