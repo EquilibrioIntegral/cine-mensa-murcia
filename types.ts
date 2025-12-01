@@ -103,6 +103,15 @@ export interface CineEvent {
   
   candidates: EventCandidate[];
   winnerTmdbId?: number; // Set after voting ends
+  
+  // Social Commitment
+  committedViewers?: string[]; // IDs of users who promise to watch
+  committedDebaters?: string[]; // IDs of users who promise to attend debate
+  
+  // Time Voting (Doodle)
+  timeVotes?: Record<string, string[]>; // Key: "Friday_22", Value: Array of UserIDs
+  finalDebateDate?: number; // Timestamp of the chosen date
+  debateDecisionMessage?: string; // AI explanation of the time choice
 }
 
 export interface ChatMessage {

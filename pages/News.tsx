@@ -2,7 +2,7 @@
 import React from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle } from 'lucide-react';
+import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle, Eye, MessageCircle } from 'lucide-react';
 
 const News: React.FC = () => {
   const { news, activeEvent, setView, user } = useData();
@@ -62,6 +62,24 @@ const News: React.FC = () => {
                                   <Calendar size={18} className="text-cine-gold"/>
                                   <span className="text-sm font-bold">
                                       Votación abierta: <span className="text-gray-300">Del {new Date(activeEvent.startDate).toLocaleDateString()} al {new Date(activeEvent.votingDeadline).toLocaleDateString()}</span>
+                                  </span>
+                              </div>
+                          )}
+
+                          {activeEvent.phase === 'viewing' && (
+                              <div className="inline-flex items-center gap-2 bg-black/60 text-white px-4 py-2 rounded-lg backdrop-blur-sm border border-gray-600">
+                                  <Eye size={18} className="text-cine-gold"/>
+                                  <span className="text-sm font-bold">
+                                      Visualización: <span className="text-gray-300">Hasta el {new Date(activeEvent.viewingDeadline).toLocaleDateString()}</span>
+                                  </span>
+                              </div>
+                          )}
+                          
+                          {activeEvent.phase === 'discussion' && (
+                              <div className="inline-flex items-center gap-2 bg-black/60 text-white px-4 py-2 rounded-lg backdrop-blur-sm border border-gray-600">
+                                  <MessageCircle size={18} className="text-cine-gold"/>
+                                  <span className="text-sm font-bold">
+                                      Debate en curso
                                   </span>
                               </div>
                           )}
