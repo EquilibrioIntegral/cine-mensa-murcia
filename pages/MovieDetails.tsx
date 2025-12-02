@@ -6,6 +6,7 @@ import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote,
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
+import RankBadge from '../components/RankBadge';
 
 // Subcomponent for individual reviews to handle spoiler toggle state
 interface ReviewItemProps {
@@ -26,10 +27,13 @@ const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, 
   return (
     <div className="p-4 border-b border-gray-800 last:border-0 hover:bg-white/5 transition-colors">
         <div className="flex items-center gap-3 mb-2">
-            <img src={reviewer?.avatarUrl || 'https://via.placeholder.com/32'} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-700" />
+            <img src={reviewer?.avatarUrl || 'https://via.placeholder.com/32'} alt="Avatar" className="w-10 h-10 rounded-full border border-gray-700" />
             <div>
-                <p className="text-sm font-bold text-white leading-none">{reviewer?.name || 'Usuario desconocido'}</p>
-                <p className="text-xs text-gray-500">{new Date(review.timestamp).toLocaleDateString()}</p>
+                <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold text-white leading-none">{reviewer?.name || 'Usuario desconocido'}</p>
+                    {reviewer && <RankBadge level={reviewer.level || 1} size="sm" />}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{new Date(review.timestamp).toLocaleDateString()}</p>
             </div>
             <div className="ml-auto bg-black/40 px-2 py-1 rounded text-cine-gold font-bold text-sm border border-cine-gold/20">
                 {review.rating.toFixed(1)}

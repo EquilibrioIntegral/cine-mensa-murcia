@@ -29,6 +29,11 @@ export interface User {
   // Usage tracking for Voice Limits
   voiceUsageDate?: number; // Timestamp of last usage day
   voiceUsageSeconds?: number; // Seconds used today
+  
+  // GAMIFICATION
+  xp: number;
+  level: number;
+  completedMissions: string[]; // IDs of completed missions
 }
 
 export interface DetailedRating {
@@ -65,7 +70,7 @@ export enum ViewState {
   MOVIE_DETAILS,
   EVENTS,
   FEEDBACK,
-  PROFILE // New Profile View
+  PROFILE
 }
 
 // --- NEW EVENT TYPES ---
@@ -161,4 +166,23 @@ export interface LiveSessionState {
     type: 'movie' | 'person';
     data: any; // Movie or TMDBPersonResult
   }[];
+}
+
+// --- GAMIFICATION TYPES ---
+export interface Rank {
+  id: string;
+  title: string;
+  minLevel: number;
+  color: string; // Tailwind color class or hex
+  icon?: string;
+}
+
+export interface Mission {
+  id: string;
+  title: string;
+  description: string;
+  xpReward: number;
+  icon: any; // Lucide Icon component name or similar
+  condition: (user: User, stats: { ratingsCount: number, reviewsCount: number, likesReceived: number, horrorCount: number }) => boolean;
+  maxProgress?: number; // For progress bars (e.g., 5/10)
 }

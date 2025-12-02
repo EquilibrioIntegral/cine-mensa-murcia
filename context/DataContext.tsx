@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState } from '../types';
+import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission } from '../types';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -29,6 +29,7 @@ import {
 import { decideBestTime, generateCinemaNews } from '../services/geminiService';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
 import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB, searchMoviesTMDB } from '../services/tmdbService';
+import { MISSIONS, XP_PER_LEVEL } from '../constants';
 
 // --- AUDIO UTILS ---
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -117,6 +118,10 @@ interface DataContextType {
   deleteFeedback: (id: string) => Promise<void>;
   
   getEpisodeCount: () => Promise<number>;
+  
+  // Notification State (For Gamification)
+  notification: { message: string, type: 'level' | 'mission' } | null;
+  clearNotification: () => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -134,6 +139,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [eventMessages, setEventMessages] = useState<EventMessage[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [feedbackList, setFeedbackList] = useState<AppFeedback[]>([]);
+  
+  const [notification, setNotification] = useState<{ message: string, type: 'level' | 'mission' } | null>(null);
   
   // Top Critic Calculation
   const [topCriticId, setTopCriticId] = useState<string | null>(null);
@@ -159,6 +166,72 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   // Timer Ref for usage tracking
   const usageIntervalRef = useRef<number | null>(null);
+
+  // --- GAMIFICATION ENGINE ---
+  const checkAchievements = async (currentUser: User) => {
+      if (!currentUser) return;
+      
+      const myRatings = userRatings.filter(r => r.userId === currentUser.id);
+      
+      // Calculate Stats
+      const stats = {
+          ratingsCount: myRatings.length,
+          reviewsCount: myRatings.filter(r => r.comment && r.comment.length > 5).length,
+          likesReceived: myRatings.reduce((acc, r) => acc + (r.likes?.length || 0), 0),
+          horrorCount: myRatings.filter(r => {
+              const m = movies.find(mov => mov.id === r.movieId);
+              return m && m.genre.some(g => g.toLowerCase().includes('terror') || g.toLowerCase().includes('horror'));
+          }).length
+      };
+
+      let newXp = currentUser.xp || 0; 
+      let newCompletedMissions = [...(currentUser.completedMissions || [])]; // SAFE INIT
+      let missionsCompletedNow: Mission[] = [];
+
+      MISSIONS.forEach(mission => {
+          if (!newCompletedMissions.includes(mission.id)) {
+              if (mission.condition(currentUser, stats)) {
+                  newXp += mission.xpReward;
+                  newCompletedMissions.push(mission.id);
+                  missionsCompletedNow.push(mission);
+              }
+          }
+      });
+
+      // Calculate Level
+      // Level 1 = 0-99 XP, Level 2 = 100-199 XP...
+      const oldLevel = currentUser.level || 1;
+      const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
+
+      // Update Database only if changes
+      if (newXp !== currentUser.xp || newCompletedMissions.length !== (currentUser.completedMissions || []).length) {
+          try {
+              await updateDoc(doc(db, 'users', currentUser.id), {
+                  xp: newXp,
+                  level: newLevel,
+                  completedMissions: newCompletedMissions
+              });
+              
+              // Notifications
+              if (newLevel > oldLevel) {
+                  setNotification({ message: `¡HAS SUBIDO AL NIVEL ${newLevel}!`, type: 'level' });
+              } else if (missionsCompletedNow.length > 0) {
+                  setNotification({ message: `¡Misión Completada: ${missionsCompletedNow[0].title}!`, type: 'mission' });
+              }
+          } catch(e) { console.error("Gamification update error", e); }
+      }
+  };
+
+  // Trigger gamification check when relevant data changes
+  useEffect(() => {
+      if (user && userRatings.length > 0) {
+          // Debounce to avoid spamming
+          const t = setTimeout(() => checkAchievements(user), 2000);
+          return () => clearTimeout(t);
+      }
+  }, [userRatings.length, user?.avatarUrl]); // Triggers on rating count change or avatar change
+
+  const clearNotification = () => setNotification(null);
 
   // --- CALCULATE TOP CRITIC ---
   useEffect(() => {
@@ -695,18 +768,79 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdminEmail = (email: string) => email.toLowerCase().startsWith('andresroblesjimenez');
   const login = async (email: string, pass: string) => { try { await signInWithEmailAndPassword(auth, email, pass); return { success: true, message: "OK" }; } catch (e:any) { return { success: false, message: String(e.message) }; } };
   const logout = async () => { await signOut(auth); setUser(null); setCurrentView(ViewState.LOGIN); };
-  const register = async (email: string, name: string, pass: string, avatar?: string) => { try { await createUserWithEmailAndPassword(auth, email, pass); const u: User = { id: auth.currentUser!.uid, email, name, avatarUrl: avatar || `https://ui-avatars.com/api/?name=${name}`, watchedMovies: [], watchlist: [], status: isAdminEmail(email)?'active':'pending', isAdmin: isAdminEmail(email) }; await setDoc(doc(db, 'users', u.id), u); return { success: true, message: "OK" }; } catch (e:any) { return { success: false, message: String(e.message) }; } };
+  const register = async (email: string, name: string, pass: string, avatar?: string) => { 
+      try { 
+          await createUserWithEmailAndPassword(auth, email, pass); 
+          const u: User = { 
+              id: auth.currentUser!.uid, 
+              email, 
+              name, 
+              avatarUrl: avatar || `https://ui-avatars.com/api/?name=${name}`, 
+              watchedMovies: [], 
+              watchlist: [], 
+              status: isAdminEmail(email)?'active':'pending', 
+              isAdmin: isAdminEmail(email),
+              xp: 0,
+              level: 1,
+              completedMissions: []
+          }; 
+          await setDoc(doc(db, 'users', u.id), u); 
+          return { success: true, message: "OK" }; 
+      } catch (e:any) { return { success: false, message: String(e.message) }; } 
+  };
   const resetPassword = async (email: string) => { try { await sendPasswordResetEmail(auth, email); return { success: true, message: "Email enviado" }; } catch(e:any) { return { success: false, message: String(e.message) }; } };
-  const updateUserProfile = async (name: string, avatarUrl: string) => { if (!user) return; try { await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); } catch (e) { console.error(String(e)); } };
+  const updateUserProfile = async (name: string, avatarUrl: string) => { 
+      if (!user) return; 
+      try { 
+          await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); 
+          // Trigger gamification check on profile update
+          checkAchievements({ ...user, name, avatarUrl });
+      } catch (e) { console.error(String(e)); } 
+  };
   const approveUser = async (uid: string) => { try { await updateDoc(doc(db, 'users', uid), { status: 'active' }); } catch (e) { console.error(String(e)); } };
   const rejectUser = async (uid: string) => { try { await updateDoc(doc(db, 'users', uid), { status: 'rejected' }); } catch (e) { console.error(String(e)); } };
   const setView = (v: ViewState, mid?: string) => { setCurrentView(v); if (mid) setSelectedMovieId(mid); };
   
   const addMovie = async (movie: Movie) => { try { const r = doc(db, 'movies', movie.id); const s = await getDoc(r); if (!s.exists()) await setDoc(r, movie); } catch (e) { console.error(String(e)); } };
   const setTmdbToken = async (token: string) => { try { await setDoc(doc(db, 'settings', 'tmdb'), { token }); } catch (e) { console.error(String(e)); } };
-  const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => { if (!user) return; try { const id = `${user.id}_${movieId}`; const r: UserRating = { movieId, userId: user.id, detailed: rating, rating: rating.average, comment, spoiler, timestamp: Date.now(), likes: [], dislikes: [] }; await setDoc(doc(db, 'ratings', id), r); if (!user.watchedMovies.includes(movieId)) await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayUnion(movieId), watchlist: arrayRemove(movieId) }); const all = userRatings.filter(x => x.movieId === movieId && x.userId !== user.id).concat(r); const avg = all.reduce((a,b) => a+b.rating, 0)/all.length; await updateDoc(doc(db, 'movies', movieId), { rating: parseFloat(avg.toFixed(1)), totalVotes: all.length }); } catch (e) { console.error(String(e)); } };
+  
+  const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => { 
+      if (!user) return; 
+      try { 
+          const id = `${user.id}_${movieId}`; 
+          const r: UserRating = { movieId, userId: user.id, detailed: rating, rating: rating.average, comment, spoiler, timestamp: Date.now(), likes: [], dislikes: [] }; 
+          await setDoc(doc(db, 'ratings', id), r); 
+          if (!user.watchedMovies.includes(movieId)) await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayUnion(movieId), watchlist: arrayRemove(movieId) }); 
+          const all = userRatings.filter(x => x.movieId === movieId && x.userId !== user.id).concat(r); 
+          const avg = all.reduce((a,b) => a+b.rating, 0)/all.length; 
+          await updateDoc(doc(db, 'movies', movieId), { rating: parseFloat(avg.toFixed(1)), totalVotes: all.length }); 
+          
+          // Trigger gamification
+          checkAchievements(user);
+      } catch (e) { console.error(String(e)); } 
+  };
+  
   const unwatchMovie = async (movieId: string) => { if (!user) return; try { await deleteDoc(doc(db, 'ratings', `${user.id}_${movieId}`)); await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayRemove(movieId) }); } catch (e) { console.error(String(e)); } };
-  const toggleReviewVote = async (tid: string, mid: string, type: 'like'|'dislike') => { if (!user) return; try { const ref = doc(db, 'ratings', `${tid}_${mid}`); const s = await getDoc(ref); if (!s.exists()) return; const d = s.data() as UserRating; const likes = d.likes||[]; const dislikes = d.dislikes||[]; let u: any = {}; if (type === 'like') { if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); else { u['likes'] = arrayUnion(user.id); if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); } } else { if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); else { u['dislikes'] = arrayUnion(user.id); if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); } } await updateDoc(ref, u); } catch (e) { console.error(String(e)); } };
+  
+  const toggleReviewVote = async (tid: string, mid: string, type: 'like'|'dislike') => { 
+      if (!user) return; 
+      try { 
+          const ref = doc(db, 'ratings', `${tid}_${mid}`); 
+          const s = await getDoc(ref); 
+          if (!s.exists()) return; 
+          const d = s.data() as UserRating; 
+          const likes = d.likes||[]; 
+          const dislikes = d.dislikes||[]; 
+          let u: any = {}; 
+          if (type === 'like') { if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); else { u['likes'] = arrayUnion(user.id); if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); } } else { if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); else { u['dislikes'] = arrayUnion(user.id); if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); } } 
+          await updateDoc(ref, u); 
+          
+          // Trigger gamification for the review author (they got a like)
+          const author = allUsers.find(u => u.id === tid);
+          if (author) checkAchievements(author);
+
+      } catch (e) { console.error(String(e)); } 
+  };
 
   // --- SYNCED WATCHLIST ---
   const toggleWatchlist = async (movieId: string) => {
@@ -837,6 +971,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ...(audioBase64 && { audioBase64 }) 
           }; 
           await addDoc(collection(db, 'events', eventId, 'chat'), m); 
+          
+          // Chatting in Cineforum gives XP (Check mission)
+          if (role === 'user') checkAchievements(user);
+
       } catch (e) { console.error(String(e)); } 
   };
 
@@ -877,7 +1015,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote,
       raiseHand, grantTurn, releaseTurn,
       sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount,
-      liveSession, startLiveSession, stopLiveSession
+      liveSession, startLiveSession, stopLiveSession,
+      notification, clearNotification
     }}>
       {children}
     </DataContext.Provider>

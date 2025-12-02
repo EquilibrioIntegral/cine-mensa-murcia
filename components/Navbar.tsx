@@ -1,11 +1,12 @@
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug } from 'lucide-react';
+import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell } from 'lucide-react';
+import RankBadge from './RankBadge';
 
 const Navbar: React.FC = () => {
-  const { user, setView, currentView, logout } = useData();
+  const { user, setView, currentView, logout, notification, clearNotification } = useData();
 
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
@@ -21,71 +22,99 @@ const Navbar: React.FC = () => {
     </button>
   );
 
+  // Auto-clear notification
+  useEffect(() => {
+      if (notification) {
+          const t = setTimeout(clearNotification, 5000);
+          return () => clearTimeout(t);
+      }
+  }, [notification]);
+
   return (
-    <nav className="sticky top-0 z-50 bg-cine-dark/95 backdrop-blur-md border-b border-gray-800">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-        <div 
-            className="flex items-center gap-2 cursor-pointer"
-            onClick={() => setView(ViewState.NEWS)}
-        >
-          <Film className="text-cine-gold" size={28} />
-          <h1 className="text-xl font-bold tracking-wider text-white hidden md:block">CINE MENSA<span className="text-cine-gold">MURCIA</span></h1>
-          <h1 className="text-xl font-bold tracking-wider text-white md:hidden">CM<span className="text-cine-gold">M</span></h1>
-        </div>
-
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <NavItem view={ViewState.NEWS} icon={Home} label="Noticias" />
-            <NavItem view={ViewState.DASHBOARD} icon={Film} label="Catálogo" />
-            <NavItem view={ViewState.EVENTS} icon={Ticket} label="Eventos" />
-            <NavItem view={ViewState.RANKING} icon={Trophy} label="Ranking" />
-            <NavItem view={ViewState.WATCHLIST} icon={ListVideo} label="Lista" />
-            <NavItem view={ViewState.RECOMMENDATIONS} icon={Sparkles} label="IA" />
-            {user?.isAdmin && (
-               <button
-                  onClick={() => setView(ViewState.ADMIN_PANEL)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all ${
-                    currentView === ViewState.ADMIN_PANEL
-                      ? 'bg-red-900 text-white font-bold' 
-                      : 'text-red-400 hover:text-red-300 hover:bg-white/10'
-                  }`}
-                  title="Panel Admin"
-                >
-                  <Shield size={18} />
-                </button>
-            )}
-        </div>
-
-        <div className="flex items-center gap-4">
-            <button 
-                onClick={() => setView(ViewState.FEEDBACK)}
-                className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
-                title="Reportar Bug o Mejora"
+    <>
+        <nav className="sticky top-0 z-50 bg-cine-dark/95 backdrop-blur-md border-b border-gray-800">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+            <div 
+                className="flex items-center gap-2 cursor-pointer"
+                onClick={() => setView(ViewState.NEWS)}
             >
-                <Bug size={20} />
-            </button>
-
-            <button 
-                onClick={() => setView(ViewState.DASHBOARD)}
-                className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
-                title="Buscar película"
-            >
-                <Search size={22} />
-            </button>
-
-            <div className="hidden md:flex items-center gap-3 cursor-pointer group" onClick={() => setView(ViewState.PROFILE)}>
-                <span className="text-sm font-medium text-gray-300 max-w-[100px] truncate group-hover:text-cine-gold transition-colors">{user?.name}</span>
-                <img src={user?.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-700 group-hover:border-cine-gold transition-colors object-cover" />
+            <Film className="text-cine-gold" size={28} />
+            <h1 className="text-xl font-bold tracking-wider text-white hidden md:block">CINE MENSA<span className="text-cine-gold">MURCIA</span></h1>
+            <h1 className="text-xl font-bold tracking-wider text-white md:hidden">CM<span className="text-cine-gold">M</span></h1>
             </div>
-            <button 
-                onClick={logout} 
-                className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                title="Cerrar sesión"
-            >
-                <LogOut size={20} />
-            </button>
+
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                <NavItem view={ViewState.NEWS} icon={Home} label="Noticias" />
+                <NavItem view={ViewState.DASHBOARD} icon={Film} label="Catálogo" />
+                <NavItem view={ViewState.EVENTS} icon={Ticket} label="Eventos" />
+                <NavItem view={ViewState.RANKING} icon={Trophy} label="Ranking" />
+                <NavItem view={ViewState.WATCHLIST} icon={ListVideo} label="Lista" />
+                <NavItem view={ViewState.RECOMMENDATIONS} icon={Sparkles} label="IA" />
+                {user?.isAdmin && (
+                <button
+                    onClick={() => setView(ViewState.ADMIN_PANEL)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all ${
+                        currentView === ViewState.ADMIN_PANEL
+                        ? 'bg-red-900 text-white font-bold' 
+                        : 'text-red-400 hover:text-red-300 hover:bg-white/10'
+                    }`}
+                    title="Panel Admin"
+                    >
+                    <Shield size={18} />
+                    </button>
+                )}
+            </div>
+
+            <div className="flex items-center gap-4">
+                <button 
+                    onClick={() => setView(ViewState.FEEDBACK)}
+                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
+                    title="Reportar Bug o Mejora"
+                >
+                    <Bug size={20} />
+                </button>
+
+                <button 
+                    onClick={() => setView(ViewState.DASHBOARD)}
+                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
+                    title="Buscar película"
+                >
+                    <Search size={22} />
+                </button>
+
+                <div className="hidden md:flex items-center gap-3 cursor-pointer group" onClick={() => setView(ViewState.PROFILE)}>
+                    <div className="flex flex-col items-end">
+                        <span className="text-sm font-medium text-gray-300 max-w-[100px] truncate group-hover:text-cine-gold transition-colors">{user?.name}</span>
+                        {user && <span className="text-[10px] text-cine-gold font-black">LVL {user.level || 1}</span>}
+                    </div>
+                    <img src={user?.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full border border-gray-700 group-hover:border-cine-gold transition-colors object-cover" />
+                </div>
+                <button 
+                    onClick={logout} 
+                    className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                    title="Cerrar sesión"
+                >
+                    <LogOut size={20} />
+                </button>
+            </div>
         </div>
-      </div>
-    </nav>
+        </nav>
+
+        {/* NOTIFICATION TOAST */}
+        {notification && (
+            <div className="fixed top-20 right-4 z-[100] animate-slide-in-right">
+                <div className={`p-4 rounded-xl border shadow-2xl flex items-center gap-3 ${notification.type === 'level' ? 'bg-gradient-to-r from-cine-gold to-yellow-600 text-black border-yellow-400' : 'bg-gray-800 text-white border-cine-gold'}`}>
+                    <div className={`p-2 rounded-full ${notification.type === 'level' ? 'bg-black text-cine-gold' : 'bg-cine-gold text-black'}`}>
+                        {notification.type === 'level' ? <Trophy size={20}/> : <Bell size={20}/>}
+                    </div>
+                    <div>
+                        <h4 className="font-bold uppercase text-xs tracking-wider">{notification.type === 'level' ? '¡NIVEL SUBIDO!' : '¡MISIÓN COMPLETADA!'}</h4>
+                        <p className="text-sm font-bold">{notification.message}</p>
+                    </div>
+                </div>
+            </div>
+        )}
+    </>
   );
 };
 
