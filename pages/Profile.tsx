@@ -149,7 +149,7 @@ const Profile: React.FC = () => {
                                     <div key={idx} className="border-b border-gray-800 pb-3 last:border-0">
                                         <div className="flex justify-between mb-1">
                                             <span className="text-cine-gold font-bold">{r.rating.toFixed(1)} <span className="text-xs text-gray-500">/ 10</span></span>
-                                            <span className="text-xs text-gray-500">{new Date(r.timestamp).toLocaleDateString()}</p>
+                                            <span className="text-xs text-gray-500">{new Date(r.timestamp).toLocaleDateString()}</span>
                                         </div>
                                         <p className="text-gray-300 text-sm line-clamp-2">"{r.comment}"</p>
                                     </div>
