@@ -29,29 +29,33 @@ const RatingModal: React.FC<RatingModalProps> = ({
     soundtrack: 5,
     enjoyment: 5
   });
-  const [comment, setComment] = useState(initialComment);
-  const [spoiler, setSpoiler] = useState(initialSpoiler);
-  const [showSpoilerInput, setShowSpoilerInput] = useState(!!initialSpoiler);
+  const [comment, setComment] = useState('');
+  const [spoiler, setSpoiler] = useState('');
+  const [showSpoilerInput, setShowSpoilerInput] = useState(false);
 
+  // Sync state when modal opens or props change
   useEffect(() => {
-    if (initialRating) {
-      setCategories({
-        script: initialRating.script,
-        direction: initialRating.direction,
-        photography: initialRating.photography,
-        acting: initialRating.acting,
-        soundtrack: initialRating.soundtrack,
-        enjoyment: initialRating.enjoyment
-      });
+    if (isOpen) {
+        if (initialRating) {
+            setCategories({
+                script: initialRating.script,
+                direction: initialRating.direction,
+                photography: initialRating.photography,
+                acting: initialRating.acting,
+                soundtrack: initialRating.soundtrack,
+                enjoyment: initialRating.enjoyment
+            });
+        } else {
+            // Reset to defaults if new rating
+            setCategories({
+                script: 5, direction: 5, photography: 5, acting: 5, soundtrack: 5, enjoyment: 5
+            });
+        }
+        setComment(initialComment || '');
+        setSpoiler(initialSpoiler || '');
+        setShowSpoilerInput(!!initialSpoiler);
     }
-  }, [initialRating]);
-
-  useEffect(() => {
-      // Update local state if initials change (e.g. re-opening)
-      setComment(initialComment);
-      setSpoiler(initialSpoiler);
-      setShowSpoilerInput(!!initialSpoiler);
-  }, [initialComment, initialSpoiler, isOpen]);
+  }, [isOpen, initialRating, initialComment, initialSpoiler]);
 
   if (!isOpen) return null;
 
@@ -84,12 +88,15 @@ const RatingModal: React.FC<RatingModalProps> = ({
   };
 
   const average = calculateAverage();
+  const isEditing = !!initialRating;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
       <div className="bg-cine-gray w-full max-w-lg rounded-xl border border-gray-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-black/20">
-          <h3 className="text-xl font-bold text-white truncate pr-4">Valorar: {movieTitle}</h3>
+          <h3 className="text-xl font-bold text-white truncate pr-4">
+            {isEditing ? 'Editar Valoración' : 'Valorar'}: {movieTitle}
+          </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
             <X size={24} />
           </button>
@@ -176,7 +183,7 @@ const RatingModal: React.FC<RatingModalProps> = ({
                 type="submit"
                 className="bg-cine-gold text-cine-dark px-8 py-3 rounded-lg font-bold hover:bg-white transition-colors flex items-center gap-2"
              >
-                <Check size={20} /> Guardar Valoración
+                <Check size={20} /> {isEditing ? 'Actualizar' : 'Guardar'}
              </button>
           </div>
         </form>

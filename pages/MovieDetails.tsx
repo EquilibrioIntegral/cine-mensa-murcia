@@ -1,8 +1,7 @@
-
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -15,9 +14,10 @@ interface ReviewItemProps {
   currentUser: User | null;
   isWatched: boolean;
   toggleReviewVote: (targetUserId: string, movieId: string, voteType: 'like' | 'dislike') => void;
+  onEdit?: () => void;
 }
 
-const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, isWatched, toggleReviewVote }) => {
+const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, isWatched, toggleReviewVote, onEdit }) => {
   const [showSpoiler, setShowSpoiler] = useState(false);
 
   const isLiked = currentUser && review.likes?.includes(currentUser.id);
@@ -25,18 +25,34 @@ const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, 
   const isMyReview = currentUser?.id === review.userId;
 
   return (
-    <div className="p-4 border-b border-gray-800 last:border-0 hover:bg-white/5 transition-colors">
+    <div className="p-4 border-b border-gray-800 last:border-0 hover:bg-white/5 transition-colors group">
         <div className="flex items-center gap-3 mb-2">
             <img src={reviewer?.avatarUrl || 'https://via.placeholder.com/32'} alt="Avatar" className="w-10 h-10 rounded-full border border-gray-700" />
-            <div>
+            <div className="flex-grow">
                 <div className="flex items-center gap-2">
                     <p className="text-sm font-bold text-white leading-none">{reviewer?.name || 'Usuario desconocido'}</p>
                     {reviewer && <RankBadge level={reviewer.level || 1} size="sm" />}
+                    
+                    {isMyReview && (
+                        <span className="ml-2 text-[10px] bg-cine-gold/20 text-cine-gold px-2 py-0.5 rounded font-bold uppercase">Yo</span>
+                    )}
                 </div>
                 <p className="text-xs text-gray-500 mt-1">{new Date(review.timestamp).toLocaleDateString()}</p>
             </div>
-            <div className="ml-auto bg-black/40 px-2 py-1 rounded text-cine-gold font-bold text-sm border border-cine-gold/20">
-                {review.rating.toFixed(1)}
+            
+            <div className="flex items-center gap-3">
+                {isMyReview && onEdit && (
+                    <button 
+                        onClick={onEdit}
+                        className="text-gray-400 hover:text-cine-gold p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                        title="Editar mi reseña y puntuación"
+                    >
+                        <Pencil size={14} />
+                    </button>
+                )}
+                <div className="bg-black/40 px-2 py-1 rounded text-cine-gold font-bold text-sm border border-cine-gold/20">
+                    {review.rating.toFixed(1)}
+                </div>
             </div>
         </div>
         
@@ -277,8 +293,9 @@ const MovieDetails: React.FC = () => {
   };
 
   const handleWatchedClick = () => {
+      // Whether first time or editing, we open the rating modal.
+      // If it's the first time, we might trigger the quiz if configured, but for editing we skip to modal.
       if (isWatched) {
-          // Already watched, just open edit modal
           setShowRatingModal(true);
       } else {
           // First time watching -> SECURITY QUIZ
@@ -488,7 +505,15 @@ const MovieDetails: React.FC = () => {
               
               {/* Detailed Rating Visualization if User Rated */}
               {userRating && userRating.detailed && (
-                  <section className="bg-gradient-to-r from-cine-gray to-black border border-gray-800 p-6 rounded-xl animate-fade-in">
+                  <section className="bg-gradient-to-r from-cine-gray to-black border border-gray-800 p-6 rounded-xl animate-fade-in relative group">
+                      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button 
+                            onClick={() => setShowRatingModal(true)}
+                            className="text-gray-400 hover:text-cine-gold flex items-center gap-1 text-sm bg-black/50 px-2 py-1 rounded"
+                         >
+                            <Pencil size={12}/> Editar mis notas
+                         </button>
+                      </div>
                       <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
                           <Star className="text-cine-gold" fill="currentColor" /> Tu Valoración Detallada
                       </h3>
@@ -605,6 +630,7 @@ const MovieDetails: React.FC = () => {
                                       currentUser={user}
                                       isWatched={isWatched}
                                       toggleReviewVote={toggleReviewVote}
+                                      onEdit={review.userId === user?.id ? () => setShowRatingModal(true) : undefined}
                                    />
                                ))}
                            </div>
