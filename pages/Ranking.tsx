@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import { Trophy, Users, Star, ThumbsUp, Medal } from 'lucide-react';
@@ -35,7 +36,14 @@ const Ranking: React.FC = () => {
             };
         })
         .filter(u => u.reviewCount > 0) // Only show users who have participated
-        .sort((a, b) => b.prestige - a.prestige); // Sort by prestige
+        .sort((a, b) => {
+            // 1. Primary: Prestige (Highest first)
+            if (b.prestige !== a.prestige) {
+                return b.prestige - a.prestige;
+            }
+            // 2. Tie-breaker: Review Count (Highest first)
+            return b.reviewCount - a.reviewCount;
+        });
   }, [allUsers, userRatings]);
 
   return (
@@ -126,7 +134,7 @@ const Ranking: React.FC = () => {
                       <h4 className="text-cine-gold font-bold">¿Cómo subir en el ranking?</h4>
                       <p className="text-sm text-gray-300">
                           Tu "Prestigio" aumenta cuando otros socios le dan <strong>Me Gusta</strong> a tus reseñas. 
-                          ¡Escribe críticas útiles, divertidas y bien argumentadas para llegar al número 1!
+                          En caso de empate, ¡gana quien tenga <strong>más reseñas</strong> escritas!
                       </p>
                   </div>
               </div>
