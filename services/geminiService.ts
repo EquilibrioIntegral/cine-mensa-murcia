@@ -100,7 +100,7 @@ export const enhanceUpdateContent = async (draft: string): Promise<{ title: stri
     }
 };
 
-export const generateCinemaNews = async (): Promise<{ title: string, content: string, visualPrompt: string }[]> => {
+export const generateCinemaNews = async (): Promise<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]> => {
     if (!isAiAvailable()) return [];
 
     const prompt = `
@@ -116,7 +116,8 @@ export const generateCinemaNews = async (): Promise<{ title: string, content: st
         Para cada noticia genera:
         1. "title": Un titular periodístico en español atractivo.
         2. "content": Un resumen de 2-3 frases en español.
-        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen (ej: "close up of actor X, cinematic lighting").
+        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen IA (ej: "close up of actor X, cinematic lighting").
+        4. "searchQuery": El nombre exacto de la película, actor o director protagonista para buscar su foto REAL en una base de datos (ej: "Brad Pitt", "Dune: Part Two", "Christopher Nolan").
 
         IMPORTANTE:
         Devuelve la respuesta ESTRICTAMENTE como un JSON Array dentro de un bloque de código markdown json.
@@ -125,7 +126,7 @@ export const generateCinemaNews = async (): Promise<{ title: string, content: st
         Ejemplo de salida esperada:
         \`\`\`json
         [
-          { "title": "...", "content": "...", "visualPrompt": "..." }
+          { "title": "...", "content": "...", "visualPrompt": "...", "searchQuery": "..." }
         ]
         \`\`\`
     `;

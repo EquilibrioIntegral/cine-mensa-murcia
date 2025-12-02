@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
+import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
 const AdminPanel: React.FC = () => {
   const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews } = useData();
@@ -25,7 +26,7 @@ const AdminPanel: React.FC = () => {
   const [updateContent, setUpdateContent] = useState('');
 
   // World News State
-  const [generatedNews, setGeneratedNews] = useState<{ title: string, content: string, visualPrompt: string }[]>([]);
+  const [generatedNews, setGeneratedNews] = useState<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]>([]);
 
   const pendingUsers = allUsers.filter(u => u.status === 'pending');
   const pendingFeedback = feedbackList.filter(f => f.status === 'pending');
@@ -112,11 +113,39 @@ const AdminPanel: React.FC = () => {
       }
   };
 
-  const handleSelectGeneratedNews = (newsItem: { title: string, content: string, visualPrompt: string }) => {
+  const handleSelectGeneratedNews = async (newsItem: { title: string, content: string, visualPrompt: string, searchQuery: string }) => {
       setNewsTitle(newsItem.title);
       setNewsContent(newsItem.content);
-      const img = `https://image.pollinations.ai/prompt/${encodeURIComponent(newsItem.visualPrompt)}?nologo=true&width=800&height=400`;
-      setNewsImageUrl(img);
+      
+      // Try to find a real image from TMDB first
+      let realImage = '';
+      if (newsItem.searchQuery && tmdbToken) {
+          try {
+              // Try movie first
+              const movies = await searchMoviesTMDB(newsItem.searchQuery, tmdbToken);
+              if (movies.length > 0 && movies[0].backdrop_path) {
+                  realImage = getImageUrl(movies[0].backdrop_path, 'original');
+              } else if (movies.length > 0 && movies[0].poster_path) {
+                   realImage = getImageUrl(movies[0].poster_path, 'w500');
+              } else {
+                  // Try person
+                  const people = await searchPersonTMDB(newsItem.searchQuery, tmdbToken);
+                  if (people.length > 0 && people[0].profile_path) {
+                      realImage = getImageUrl(people[0].profile_path, 'original');
+                  }
+              }
+          } catch (e) {
+              console.error("Image search failed", e);
+          }
+      }
+
+      if (realImage) {
+          setNewsImageUrl(realImage);
+      } else {
+          // Fallback to AI Image
+          const img = `https://image.pollinations.ai/prompt/${encodeURIComponent(newsItem.visualPrompt)}?nologo=true&width=800&height=400`;
+          setNewsImageUrl(img);
+      }
       setGeneratedNews([]); // Clear selection
   };
 
@@ -289,7 +318,7 @@ const AdminPanel: React.FC = () => {
                                   <X size={14} />
                               </button>
                               <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-gray-300 flex items-center gap-1">
-                                  <ImageIcon size={12}/> Imagen IA
+                                  <ImageIcon size={12}/> {newsImageUrl.includes('tmdb') ? 'Imagen TMDB' : 'Imagen IA'}
                               </div>
                           </div>
                       )}

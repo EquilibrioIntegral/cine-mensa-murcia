@@ -1,4 +1,5 @@
 
+
 // Service to interact with TMDB API
 
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -40,6 +41,7 @@ export interface TMDBMovieResult {
   title: string;
   release_date: string;
   poster_path: string;
+  backdrop_path?: string;
   overview: string;
 }
 

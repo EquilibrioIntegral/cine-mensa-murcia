@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting, decideBestTime } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv, Volume2, VolumeX } from 'lucide-react';
 import { EventCandidate } from '../types';
 import MovieCard from '../components/MovieCard';
 import AIVisualizer from '../components/AIVisualizer';
@@ -229,7 +230,7 @@ const Events: React.FC = () => {
       if (!activeEvent) return;
       let winner = activeEvent.candidates[0];
       if (activeEvent.candidates.length > 0) {
-          winner = activeEvent.candidates.reduce((prev, current) => (prev.votes.length > current.votes.length) ? prev : current);
+          winner = activeEvent.candidates.reduce((prev: EventCandidate, current: EventCandidate) => (prev.votes.length > current.votes.length) ? prev : current);
       }
       await transitionEventPhase(activeEvent.id, 'viewing', winner.tmdbId);
   };
@@ -304,7 +305,7 @@ const Events: React.FC = () => {
       setSimulatingTime(true);
       const counts: Record<string, number> = {};
       if (activeEvent.timeVotes) {
-          Object.entries(activeEvent.timeVotes).forEach(([time, voters]) => { counts[time] = voters.length; });
+          Object.entries(activeEvent.timeVotes).forEach(([time, voters]) => { counts[time] = (voters as string[]).length; });
       }
       const winner = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId);
       const epNum = await getEpisodeCount();
