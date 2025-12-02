@@ -26,9 +26,9 @@ import {
   where,
   getCountFromServer
 } from "firebase/firestore";
-import { decideBestTime } from '../services/geminiService';
+import { decideBestTime, generateCinemaNews } from '../services/geminiService';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
-import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB } from '../services/tmdbService';
+import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB, searchMoviesTMDB } from '../services/tmdbService';
 
 // --- AUDIO UTILS ---
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -572,6 +572,65 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
       } catch (e) { console.error(String(e)); }
   };
+
+  // AUTO NEWS GENERATOR (TRIGGER ON VISIT)
+  useEffect(() => {
+        const checkAndGenerateNews = async () => {
+            if (news.length === 0 || !tmdbToken) return; // Need news to check date, and token to search images
+            
+            const now = Date.now();
+            const lastNewsTime = news[0]?.timestamp || 0;
+            const hoursSinceLast = (now - lastNewsTime) / (1000 * 60 * 60);
+            
+            // Check daily limit (10 per day)
+            const startOfDay = new Date();
+            startOfDay.setHours(0,0,0,0);
+            const todayNewsCount = news.filter(n => n.timestamp > startOfDay.getTime() && n.type === 'general').length;
+
+            // Trigger if: > 2 hours since last AND < 10 today
+            if (hoursSinceLast > 2 && todayNewsCount < 10) {
+                console.log("Auto-generating news...");
+                try {
+                    const existingTitles = news.map(n => n.title);
+                    const generatedList = await generateCinemaNews(existingTitles);
+                    
+                    if (generatedList.length > 0) {
+                        const item = generatedList[0];
+                        // Try to get real image
+                        let imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400`;
+                        
+                        if (item.searchQuery && tmdbToken) {
+                             try {
+                                 // Prioritize movie image
+                                 const movies = await searchMoviesTMDB(item.searchQuery, tmdbToken);
+                                 if (movies.length > 0 && movies[0].backdrop_path) {
+                                     imgUrl = getImageUrl(movies[0].backdrop_path, 'original');
+                                 } else if (movies.length > 0 && movies[0].poster_path) {
+                                     imgUrl = getImageUrl(movies[0].poster_path, 'w500');
+                                 } else {
+                                     // Fallback person
+                                     const people = await searchPersonTMDB(item.searchQuery, tmdbToken);
+                                     if (people.length > 0 && people[0].profile_path) {
+                                         imgUrl = getImageUrl(people[0].profile_path, 'original');
+                                     }
+                                 }
+                             } catch(e) {
+                                 console.warn("Auto-news image search failed, using AI fallback");
+                             }
+                        }
+
+                        await publishNews(item.title, item.content, 'general', imgUrl);
+                    }
+                } catch (e) {
+                    console.error("Auto news error", e);
+                }
+            }
+        };
+
+        // Run check 5 seconds after load to ensure data is ready
+        const timer = setTimeout(checkAndGenerateNews, 5000);
+        return () => clearTimeout(timer);
+  }, [news.length, tmdbToken]);
 
   useEffect(() => {
     if (!user?.id) return;

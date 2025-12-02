@@ -6,6 +6,7 @@ import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, Aler
 
 const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    // Determine if content is long enough to need expansion
     const contentPreview = item.content.length > 200 && !isExpanded;
 
     return (
