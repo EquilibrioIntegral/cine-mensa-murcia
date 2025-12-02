@@ -1,8 +1,52 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { ViewState } from '../types';
-import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle, Eye, MessageCircle } from 'lucide-react';
+import { ViewState, NewsItem } from '../types';
+import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle, Eye, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
+
+const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const contentPreview = item.content.length > 200 && !isExpanded;
+
+    return (
+        <div className="hover:bg-white/5 transition-colors group">
+            {item.imageUrl && (
+                <div className="w-full aspect-video overflow-hidden relative">
+                    <img 
+                    src={item.imageUrl} 
+                    alt={item.title} 
+                    className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-all duration-500 group-hover:scale-105" 
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-cine-gray to-transparent opacity-90"></div>
+                </div>
+            )}
+            <div className={`p-6 ${item.imageUrl ? '-mt-24 relative z-10' : ''}`}>
+                <div className="flex justify-between items-start mb-3">
+                    <h4 className="font-bold text-white text-xl leading-tight drop-shadow-lg">{item.title}</h4>
+                    <span className="text-xs text-gray-500 whitespace-nowrap ml-4 bg-black/60 px-2 py-1 rounded backdrop-blur-sm border border-gray-700">
+                        {new Date(item.timestamp).toLocaleDateString()}
+                    </span>
+                </div>
+                <div className={`text-gray-300 leading-relaxed whitespace-pre-wrap transition-all duration-300 ${contentPreview ? 'line-clamp-3' : ''}`}>
+                    {item.content}
+                </div>
+                
+                {item.content.length > 200 && (
+                    <button 
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="mt-3 text-sm text-cine-gold font-bold flex items-center gap-1 hover:text-white transition-colors"
+                    >
+                        {isExpanded ? (
+                            <>Leer menos <ChevronUp size={16}/></>
+                        ) : (
+                            <>Leer noticia completa <ChevronDown size={16}/></>
+                        )}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const News: React.FC = () => {
   const { news, activeEvent, setView, user } = useData();
@@ -110,27 +154,7 @@ const News: React.FC = () => {
                           <div className="p-12 text-center text-gray-500 italic">No hay noticias recientes en el tablón.</div>
                       ) : (
                           generalNews.map(item => (
-                              <div key={item.id} className="hover:bg-white/5 transition-colors group">
-                                  {item.imageUrl && (
-                                      <div className="w-full h-56 overflow-hidden relative">
-                                          <img 
-                                            src={item.imageUrl} 
-                                            alt={item.title} 
-                                            className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-all duration-500 group-hover:scale-105" 
-                                          />
-                                          <div className="absolute inset-0 bg-gradient-to-t from-cine-gray to-transparent opacity-90"></div>
-                                      </div>
-                                  )}
-                                  <div className={`p-6 ${item.imageUrl ? '-mt-16 relative z-10' : ''}`}>
-                                      <div className="flex justify-between items-start mb-3">
-                                          <h4 className="font-bold text-white text-xl leading-tight">{item.title}</h4>
-                                          <span className="text-xs text-gray-500 whitespace-nowrap ml-4 bg-black/40 px-2 py-1 rounded">
-                                              {new Date(item.timestamp).toLocaleDateString()}
-                                          </span>
-                                      </div>
-                                      <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{item.content}</p>
-                                  </div>
-                              </div>
+                              <NewsCard key={item.id} item={item} />
                           ))
                       )}
                   </div>

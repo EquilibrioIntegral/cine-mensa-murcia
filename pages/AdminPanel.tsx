@@ -6,7 +6,7 @@ import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '..
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews } = useData();
+  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -104,8 +104,11 @@ const AdminPanel: React.FC = () => {
   const handleGenerateWorldNews = async () => {
       setAiLoading(true);
       try {
-          const news = await generateCinemaNews();
-          setGeneratedNews(news);
+          // Extract titles of existing news to avoid duplicates
+          const existingTitles = news.map(n => n.title);
+          
+          const generated = await generateCinemaNews(existingTitles);
+          setGeneratedNews(generated);
       } catch (e) {
           console.error(e);
       } finally {
@@ -338,7 +341,7 @@ const AdminPanel: React.FC = () => {
                           {generatedNews.map((news, idx) => (
                               <div key={idx} className="bg-black/40 p-4 rounded-xl border border-gray-700 hover:border-cine-gold transition-colors cursor-pointer group" onClick={() => handleSelectGeneratedNews(news)}>
                                   <h5 className="font-bold text-white mb-2 group-hover:text-cine-gold">{news.title}</h5>
-                                  <p className="text-gray-400 text-sm line-clamp-2">{news.content}</p>
+                                  <p className="text-gray-400 text-sm line-clamp-3">{news.content}</p>
                                   <button className="mt-3 text-xs bg-cine-gold/20 text-cine-gold px-3 py-1 rounded border border-cine-gold/30 font-bold w-full">Usar esta noticia</button>
                               </div>
                           ))}

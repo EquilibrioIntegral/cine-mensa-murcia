@@ -100,33 +100,42 @@ export const enhanceUpdateContent = async (draft: string): Promise<{ title: stri
     }
 };
 
-export const generateCinemaNews = async (): Promise<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]> => {
+export const generateCinemaNews = async (existingNewsTitles: string[] = []): Promise<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]> => {
     if (!isAiAvailable()) return [];
+
+    const exclusionList = existingNewsTitles.join(", ");
 
     const prompt = `
         Utiliza la herramienta Google Search para buscar las noticias de cine más importantes y recientes de las últimas 24 HORAS.
+        
+        TEMAS A EVITAR (YA PUBLICADOS):
+        ${exclusionList}
+        (No generes noticias repetidas sobre estos temas específicos).
+
         Céntrate en:
-        - Resultados de taquilla del fin de semana.
+        - Resultados de taquilla.
         - Nuevos trailers lanzados hoy/ayer.
-        - Premios recientes o festivales en curso.
-        - Declaraciones virales de directores o actores.
+        - Premios recientes o festivales.
+        - Declaraciones virales.
         
         Selecciona las 3 noticias más relevantes y redactalas para el club "Cine Mensa Murcia".
         
         Para cada noticia genera:
         1. "title": Un titular periodístico en español atractivo.
-        2. "content": Un resumen de 2-3 frases en español.
+        2. "content": Un ARTÍCULO PERIODÍSTICO COMPLETO y EXTENSO. 
+           - Mínimo 3 o 4 párrafos bien desarrollados.
+           - Incluye contexto, antecedentes, citas si las hay, y un pequeño análisis.
+           - No te limites a un resumen corto. Queremos leer la historia completa.
         3. "visualPrompt": Una descripción en INGLÉS para generar una imagen IA (ej: "close up of actor X, cinematic lighting").
         4. "searchQuery": El nombre exacto de la película, actor o director protagonista para buscar su foto REAL en una base de datos (ej: "Brad Pitt", "Dune: Part Two", "Christopher Nolan").
 
         IMPORTANTE:
         Devuelve la respuesta ESTRICTAMENTE como un JSON Array dentro de un bloque de código markdown json.
-        No añadidas texto fuera del bloque de código.
         
         Ejemplo de salida esperada:
         \`\`\`json
         [
-          { "title": "...", "content": "...", "visualPrompt": "...", "searchQuery": "..." }
+          { "title": "...", "content": "Texto largo...", "visualPrompt": "...", "searchQuery": "..." }
         ]
         \`\`\`
     `;
@@ -709,14 +718,18 @@ export const generateSecurityQuiz = async (movieTitle: string): Promise<{ questi
 
         if (!response.text) return [];
         return JSON.parse(response.text);
-    } catch (e) {
-        console.error("Quiz Gen Error:", String(e));
-        
-        // CHECK FOR QUOTA ERROR
-        if (String(e).includes("429") || String(e).includes("quota") || String(e).includes("exhausted")) {
+    } catch (e: any) {
+        // DETECT QUOTA ERROR
+        const errStr = String(e);
+        const errJson = JSON.stringify(e);
+        const isQuota = errStr.includes("429") || errStr.includes("quota") || errStr.includes("exhausted") || errJson.includes("429") || (e.status === 429);
+
+        if (isQuota) {
+            console.warn("Gemini Quota Exceeded (Quiz Gen)");
             throw new Error("API_QUOTA_EXCEEDED");
         }
 
+        console.error("Quiz Gen Error:", errStr);
         // Fallback for OTHER errors (network, generic)
         return [
             { question: "¿Cómo termina la película? Describe la escena final." },
@@ -767,14 +780,18 @@ export const validateSecurityQuiz = async (movieTitle: string, qa: any[]): Promi
 
         if (!response.text) return { passed: true, reason: "Error de IA, aprobado." };
         return JSON.parse(response.text);
-    } catch (e) {
-        console.error("Quiz Validate Error:", String(e));
-        
-        // CHECK FOR QUOTA ERROR
-        if (String(e).includes("429") || String(e).includes("quota") || String(e).includes("exhausted")) {
+    } catch (e: any) {
+        // DETECT QUOTA ERROR
+        const errStr = String(e);
+        const errJson = JSON.stringify(e);
+        const isQuota = errStr.includes("429") || errStr.includes("quota") || errStr.includes("exhausted") || errJson.includes("429") || (e.status === 429);
+
+        if (isQuota) {
+            console.warn("Gemini Quota Exceeded (Quiz Validate)");
             throw new Error("API_QUOTA_EXCEEDED");
         }
 
+        console.error("Quiz Validate Error:", errStr);
         return { passed: true, reason: "Error técnico, aprobado." };
     }
 };
