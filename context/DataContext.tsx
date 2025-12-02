@@ -57,6 +57,9 @@ function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
   return { data: btoa(binary), mimeType: 'audio/pcm;rate=16000' };
 }
 
+// MAX DAILY SECONDS (5 Minutes)
+const DAILY_VOICE_LIMIT_SECONDS = 300; 
+
 interface DataContextType {
   user: User | null;
   allUsers: User[]; 
@@ -69,6 +72,10 @@ interface DataContextType {
   currentView: ViewState;
   selectedMovieId: string | null;
   tmdbToken: string;
+  
+  // Logic needed for locking features
+  topCriticId: string | null;
+  getRemainingVoiceSeconds: () => number;
   
   // Live Session Global State
   liveSession: LiveSessionState;
@@ -95,9 +102,14 @@ interface DataContextType {
   closeEvent: (eventId: string) => Promise<void>;
   voteForCandidate: (eventId: string, tmdbId: number) => Promise<void>;
   transitionEventPhase: (eventId: string, phase: EventPhase, winnerId?: number) => Promise<void>;
-  sendEventMessage: (eventId: string, text: string, role?: 'user' | 'moderator') => Promise<void>;
+  sendEventMessage: (eventId: string, text: string, role?: 'user' | 'moderator', audioBase64?: string) => Promise<void>;
   toggleEventCommitment: (eventId: string, type: 'view' | 'debate') => Promise<void>;
   toggleTimeVote: (eventId: string, timeSlot: string) => Promise<void>;
+
+  // Turn Management
+  raiseHand: (eventId: string) => Promise<void>;
+  grantTurn: (eventId: string, userId: string) => Promise<void>;
+  releaseTurn: (eventId: string) => Promise<void>;
 
   sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
   resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
@@ -122,6 +134,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [eventMessages, setEventMessages] = useState<EventMessage[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [feedbackList, setFeedbackList] = useState<AppFeedback[]>([]);
+  
+  // Top Critic Calculation
+  const [topCriticId, setTopCriticId] = useState<string | null>(null);
 
   // --- LIVE SESSION STATE ---
   const [liveSession, setLiveSession] = useState<LiveSessionState>({
@@ -141,9 +156,101 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
   const nextStartTimeRef = useRef<number>(0);
   const currentStreamRef = useRef<MediaStream | null>(null);
+  
+  // Timer Ref for usage tracking
+  const usageIntervalRef = useRef<number | null>(null);
+
+  // --- CALCULATE TOP CRITIC ---
+  useEffect(() => {
+      if (allUsers.length > 0 && userRatings.length > 0) {
+          const stats = allUsers
+            .filter(u => u.status === 'active' || u.isAdmin)
+            .map(u => {
+                const reviews = userRatings.filter(r => r.userId === u.id);
+                const totalLikes = reviews.reduce((acc, r) => acc + (r.likes?.length || 0), 0);
+                const totalDislikes = reviews.reduce((acc, r) => acc + (r.dislikes?.length || 0), 0);
+                const prestige = totalLikes - totalDislikes;
+                return { id: u.id, prestige, reviewCount: reviews.length };
+            })
+            .sort((a, b) => {
+                // 1. Sort by Prestige (desc)
+                if (b.prestige !== a.prestige) return b.prestige - a.prestige;
+                // 2. Sort by Review Count (desc) as tie-breaker
+                return b.reviewCount - a.reviewCount;
+            });
+          
+          if (stats.length > 0) {
+              setTopCriticId(stats[0].id);
+          }
+      }
+  }, [allUsers, userRatings]);
+
+  const getRemainingVoiceSeconds = (): number => {
+      if (!user) return 0;
+      
+      const today = new Date().setHours(0,0,0,0);
+      const lastUsageDate = user.voiceUsageDate || 0;
+      const usedToday = lastUsageDate === today ? (user.voiceUsageSeconds || 0) : 0;
+      
+      return Math.max(0, DAILY_VOICE_LIMIT_SECONDS - usedToday);
+  };
+
+  // Function to track usage every second while connected
+  const startUsageTracking = () => {
+      if (usageIntervalRef.current) clearInterval(usageIntervalRef.current);
+      
+      usageIntervalRef.current = window.setInterval(async () => {
+          if (!auth.currentUser) return;
+          
+          const today = new Date().setHours(0,0,0,0);
+          
+          // Optimistic update locally? We need to read fresh user state if possible or rely on component state
+          // For simplicity, we update Firestore directly. Ideally use a transaction.
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          // We assume we are inside a context with 'user', but inside setInterval closure 'user' might be stale.
+          // Using a small atomic increment would be better, but Firestore doesn't allow 'increment' + 'date check' easily in one line without logic.
+          // We will fetch fresh doc to be safe.
+          try {
+              const snap = await getDoc(userRef);
+              if (snap.exists()) {
+                  const data = snap.data() as User;
+                  const lastDate = data.voiceUsageDate || 0;
+                  let currentSeconds = data.voiceUsageSeconds || 0;
+                  
+                  if (lastDate !== today) {
+                      currentSeconds = 0; // Reset if new day
+                  }
+                  
+                  const newSeconds = currentSeconds + 1;
+                  
+                  if (newSeconds >= DAILY_VOICE_LIMIT_SECONDS) {
+                      stopLiveSession(); // Hard cut
+                      alert("Has alcanzado tu límite diario de 5 minutos de voz con la IA.");
+                  }
+
+                  await updateDoc(userRef, {
+                      voiceUsageDate: today,
+                      voiceUsageSeconds: newSeconds
+                  });
+              }
+          } catch(e) {
+              console.error("Usage tracking error", e);
+          }
+
+      }, 1000);
+  };
+
+  const stopUsageTracking = () => {
+      if (usageIntervalRef.current) {
+          clearInterval(usageIntervalRef.current);
+          usageIntervalRef.current = null;
+      }
+  };
 
   // --- LIVE SESSION METHODS ---
   const stopLiveSession = () => {
+      stopUsageTracking();
+
       if (liveSessionRef.current) {
           try { liveSessionRef.current.close(); } catch(e) {}
           liveSessionRef.current = null;
@@ -151,7 +258,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (processorRef.current) { processorRef.current.disconnect(); processorRef.current = null; }
       if (inputSourceRef.current) { inputSourceRef.current.disconnect(); inputSourceRef.current = null; }
       if (currentStreamRef.current) { currentStreamRef.current.getTracks().forEach(track => track.stop()); currentStreamRef.current = null; }
-      if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
+      if (audioContextRef.current) { 
+          try { audioContextRef.current.close(); } catch(e) {}
+          audioContextRef.current = null; 
+      }
       audioQueueRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
       audioQueueRef.current = [];
 
@@ -167,6 +277,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const startLiveSession = async (mode: 'general' | 'debate', contextData?: any) => {
       if (!user) return;
+
+      // 1. CHECK PERMISSIONS & LIMITS
+      const isTopCritic = user.id === topCriticId;
+      if (!user.isAdmin && !isTopCritic) {
+          alert("Acceso denegado: Solo el Administrador y el Crítico #1 del ranking pueden usar la voz en vivo. ¡Gana prestigio para desbloquearlo!");
+          return;
+      }
+
+      const remaining = getRemainingVoiceSeconds();
+      if (remaining <= 0 && !user.isAdmin) {
+          alert("Has consumido tus 5 minutos diarios de voz. ¡Vuelve mañana!");
+          return;
+      }
       
       try {
           setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...', visualContent: [] }));
@@ -196,10 +319,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 Estás en una tertulia en vivo con el socio ${user.name} sobre la película: "${movieTitle}" (Tema: ${themeTitle}).
                 
                 TU ROL:
+                - ¡HABLA PRIMERO! Nada más conectar, haz una INTRO ÉPICA, saluda al usuario y presenta la película.
                 - Moderar la charla, lanzar preguntas interesantes sobre la trama, el guion o los actores.
                 - Ser carismática, usar humor inteligente y tono de "Showwoman".
                 - HABLA POCO: Tus intervenciones deben ser cortas (1-2 frases) para dejar hablar al usuario.
                 - ESPAÑOL NEUTRO INTERNACIONAL (Sin localismos de Murcia).
+                - ¡IMPROVISA Y SÉ DIVERTIDA!
                 
                 HERRAMIENTAS VISUALES:
                 - Si hablas de un actor o una escena, ¡ÚSALAS!
@@ -251,6 +376,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               callbacks: {
                   onopen: async () => {
                       setLiveSession(prev => ({ ...prev, status: 'Conectado - Escuchando...' }));
+                      
+                      // START TRACKING TIME IF NOT ADMIN
+                      if (!user.isAdmin) {
+                          startUsageTracking();
+                      }
+
                       try {
                           const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
                           currentStreamRef.current = stream;
@@ -268,9 +399,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                           };
                           source.connect(processor);
                           processor.connect(ctx.destination);
+
                       } catch (err) {
                           console.error("Mic Error:", err);
-                          stopLiveSession();
+                          stopLiveSession(); 
                       }
                   },
                   onmessage: async (msg: LiveServerMessage) => {
@@ -314,7 +446,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                                   const { title, year } = fc.args as any;
                                   setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${title}` }));
                                   
-                                  // Fetch without awaiting to not block audio
                                   findMovieByTitleAndYear(title, year, tmdbToken).then(tmdbData => {
                                       setLiveSession(prev => ({ ...prev, toolInUse: null }));
                                       if (tmdbData) {
@@ -360,13 +491,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       }
                   },
                   onclose: () => stopLiveSession(),
-                  onerror: (e) => { console.error(e); setLiveSession(prev => ({ ...prev, status: 'Error de conexión' })); }
+                  onerror: (e) => { 
+                      console.error(e); 
+                      if (liveSessionRef.current) setLiveSession(prev => ({ ...prev, status: 'Error de conexión' })); 
+                  }
               }
           });
           liveSessionRef.current = await sessionPromise;
       } catch (e) {
           console.error(e);
-          setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Error' }));
+          stopLiveSession(); 
+          setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Error al iniciar' }));
       }
   };
 
@@ -397,7 +532,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const coll = collection(db, 'events');
           const q = query(coll, where("phase", "==", "closed"));
           const snapshot = await getCountFromServer(q);
-          return snapshot.data().count + 1; // Current episode is count + 1
+          return snapshot.data().count + 1; 
       } catch (e) {
           return 1;
       }
@@ -421,7 +556,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resolveTimeDecision = async (event: CineEvent, winnerMovieTitle: string) => {
       try {
-          // Flatten votes to count: { "Friday 22:00": 5, "Sat 22:00": 3 }
           const counts: Record<string, number> = {};
           if (event.timeVotes) {
               Object.entries(event.timeVotes).forEach(([time, voters]) => {
@@ -433,7 +567,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const result = await decideBestTime(counts, winnerMovieTitle, episodeNum);
           
           await updateDoc(doc(db, 'events', event.id), {
-              finalDebateDate: Date.now(), // Just a flag that it's done
+              finalDebateDate: Date.now(), 
               debateDecisionMessage: `${result.chosenTime} | ${result.message}`
           });
       } catch (e) { console.error(String(e)); }
@@ -476,6 +610,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 resolveTimeDecision(evt, winnerMovie?.title || 'la película');
             }
 
+            // 3. AUTO-START DISCUSSION PHASE (When scheduled time arrives)
+            // Using finalDebateDate as the trigger.
+            if (evt.phase === 'viewing' && evt.finalDebateDate && Date.now() > evt.finalDebateDate) {
+                transitionEventPhase(evt.id, 'discussion');
+            }
+
             if (evt.phase !== 'closed') setActiveEvent(evt);
             else setActiveEvent(null);
         } else { setActiveEvent(null); }
@@ -492,7 +632,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return () => unsubChat();
   }, [user?.id, activeEvent?.id, activeEvent?.phase]);
 
-  // ... (Login, Register, Reset, etc - same as before) ...
+  // --- CRUD METHODS ---
   const isAdminEmail = (email: string) => email.toLowerCase().startsWith('andresroblesjimenez');
   const login = async (email: string, pass: string) => { try { await signInWithEmailAndPassword(auth, email, pass); return { success: true, message: "OK" }; } catch (e:any) { return { success: false, message: String(e.message) }; } };
   const logout = async () => { await signOut(auth); setUser(null); setCurrentView(ViewState.LOGIN); };
@@ -514,13 +654,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return;
     try {
         const inWatchlist = user.watchlist.includes(movieId);
-        
         if (user.watchedMovies.includes(movieId)) {
             await unwatchMovie(movieId);
             await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) });
         } else if (inWatchlist) {
             await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movieId) });
-            // SYNC: If removed from watchlist, remove from event commitment if applicable
             if (activeEvent && activeEvent.phase === 'viewing') {
                 const winner = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId);
                 const winnerInternalId = movies.find(m => m.tmdbId === winner?.tmdbId)?.id;
@@ -534,7 +672,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) { console.error(String(e)); }
   };
 
-  // --- EVENT METHODS ---
   const createEvent = async (eventData: Partial<CineEvent>) => {
       if (!user?.isAdmin) return;
       try {
@@ -551,7 +688,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               backdropUrl: eventData.backdropUrl,
               committedViewers: [],
               committedDebaters: [],
-              timeVotes: {}
+              timeVotes: {},
+              speakerQueue: [],
+              currentSpeakerId: null
           };
           await setDoc(doc(db, 'events', newEvent.id), newEvent);
       } catch (e) { console.error(String(e)); }
@@ -586,7 +725,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           if (list.includes(user.id)) {
               await updateDoc(eventRef, { [field]: arrayRemove(user.id) });
-              // SYNC: If uncommitting from view, remove from watchlist
               if (type === 'view') {
                   const winner = evt.candidates.find(c => c.tmdbId === evt.winnerTmdbId);
                   if (winner) {
@@ -596,13 +734,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
           } else {
               await updateDoc(eventRef, { [field]: arrayUnion(user.id) });
-              // SYNC: If committing to view, add to watchlist
               if (type === 'view') {
                   const winner = evt.candidates.find(c => c.tmdbId === evt.winnerTmdbId);
                   if (winner) {
                       let internalId = movies.find(m => m.tmdbId === winner.tmdbId)?.id;
                       if (!internalId) {
-                          // Would need to fetch and add, simplified here
+                          // Would need to fetch and add logic here if robust
                       } else {
                           await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(internalId) });
                       }
@@ -619,22 +756,54 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const evt = (await getDoc(eventRef)).data() as CineEvent;
           const currentVotes = evt.timeVotes || {};
           const slotVotes = currentVotes[timeSlot] || [];
-          
           let newSlotVotes;
-          if (slotVotes.includes(user.id)) {
-              newSlotVotes = slotVotes.filter(uid => uid !== user.id);
-          } else {
-              newSlotVotes = [...slotVotes, user.id];
-          }
-          
+          if (slotVotes.includes(user.id)) newSlotVotes = slotVotes.filter(uid => uid !== user.id);
+          else newSlotVotes = [...slotVotes, user.id];
           await updateDoc(eventRef, { [`timeVotes.${timeSlot}`]: newSlotVotes });
       } catch (e) { console.error(String(e)); }
   };
 
   const transitionEventPhase = async (eventId: string, phase: EventPhase, winnerId?: number) => { try { const u: any = { phase }; if (winnerId) u.winnerTmdbId = winnerId; await updateDoc(doc(db, 'events', eventId), u); } catch (e) { console.error(String(e)); } };
-  const sendEventMessage = async (eventId: string, text: string, role: 'user' | 'moderator' = 'user') => { if (!user) return; try { const m: Omit<EventMessage, 'id'> = { userId: user.id, userName: role === 'moderator' ? 'IA Moderadora' : user.name, userAvatar: role === 'moderator' ? 'https://ui-avatars.com/api/?name=AI&background=d4af37&color=000' : user.avatarUrl, text, timestamp: Date.now(), role }; await addDoc(collection(db, 'events', eventId, 'chat'), m); } catch (e) { console.error(String(e)); } };
+  
+  const sendEventMessage = async (eventId: string, text: string, role: 'user' | 'moderator' = 'user', audioBase64?: string) => { 
+      if (!user) return; 
+      try { 
+          const m: Omit<EventMessage, 'id'> = { 
+              userId: user.id, 
+              userName: role === 'moderator' ? 'IA Moderadora' : user.name, 
+              userAvatar: role === 'moderator' ? 'https://ui-avatars.com/api/?name=AI&background=d4af37&color=000' : user.avatarUrl, 
+              text, 
+              timestamp: Date.now(), 
+              role,
+              ...(audioBase64 && { audioBase64 }) 
+          }; 
+          await addDoc(collection(db, 'events', eventId, 'chat'), m); 
+      } catch (e) { console.error(String(e)); } 
+  };
 
-  // News & Feedback
+  // --- TURN MANAGEMENT ---
+  const raiseHand = async (eventId: string) => {
+      if (!user) return;
+      try {
+          await updateDoc(doc(db, 'events', eventId), { speakerQueue: arrayUnion(user.id) });
+      } catch(e) { console.error(String(e)); }
+  };
+
+  const grantTurn = async (eventId: string, userId: string) => {
+      try {
+          await updateDoc(doc(db, 'events', eventId), { 
+              currentSpeakerId: userId,
+              speakerQueue: arrayRemove(userId)
+          });
+      } catch(e) { console.error(String(e)); }
+  };
+
+  const releaseTurn = async (eventId: string) => {
+      try {
+          await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: null });
+      } catch(e) { console.error(String(e)); }
+  };
+
   const sendFeedback = async (type: 'bug'|'feature', text: string) => { if (!user) return; try { await addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() }); } catch (e) { console.error(String(e)); } };
   const deleteFeedback = async (id: string) => { if (!user?.isAdmin) return; try { await deleteDoc(doc(db, 'feedback', id)); } catch (e) { console.error(String(e)); } };
   const resolveFeedback = async (id: string, res?: string) => { if (!user?.isAdmin) return; try { await updateDoc(doc(db, 'feedback', id), { status: 'solved', adminResponse: res || 'Gracias.' }); const f = (await getDoc(doc(db, 'feedback', id))).data() as AppFeedback; await publishNews(f.type === 'bug' ? '🐛 Bug Corregido' : '✨ Mejora', `Solucionado: "${f.text}"`, 'update'); } catch (e) { console.error(String(e)); } };
@@ -644,8 +813,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <DataContext.Provider value={{
       user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken,
+      topCriticId, getRemainingVoiceSeconds,
       setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
       createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote,
+      raiseHand, grantTurn, releaseTurn,
       sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount,
       liveSession, startLiveSession, stopLiveSession
     }}>

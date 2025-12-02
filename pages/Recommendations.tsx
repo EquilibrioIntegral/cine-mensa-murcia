@@ -5,11 +5,11 @@ import { getMovieRecommendations, sendChatToGemini } from '../services/geminiSer
 import { getImageUrl } from '../services/tmdbService';
 import MovieCard from '../components/MovieCard';
 import AIVisualizer from '../components/AIVisualizer';
-import { Sparkles, Loader2, AlertTriangle, Bot, Send, User as UserIcon, Mic, MicOff, Volume2, VolumeX, Zap, Phone, PhoneOff, Radio, Tv, X } from 'lucide-react';
+import { Sparkles, Loader2, AlertTriangle, Bot, Send, User as UserIcon, Mic, MicOff, Volume2, VolumeX, Zap, Phone, PhoneOff, Radio, Tv, X, Lock, Trophy } from 'lucide-react';
 import { Movie, ChatMessage } from '../types';
 
 const Recommendations: React.FC = () => {
-  const { user, movies, userRatings, tmdbToken, liveSession, startLiveSession, stopLiveSession } = useData();
+  const { user, movies, userRatings, tmdbToken, liveSession, startLiveSession, stopLiveSession, topCriticId, getRemainingVoiceSeconds } = useData();
   const [activeTab, setActiveTab] = useState<'simple' | 'chat' | 'live'>('simple');
   
   // Auto-switch to live tab if connected
@@ -85,6 +85,10 @@ const Recommendations: React.FC = () => {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, chatLoading]);
 
+  // LIVE PERMISSION CHECK
+  const isTopCritic = user?.id === topCriticId;
+  const canUseLive = user?.isAdmin || isTopCritic;
+  const remainingSeconds = getRemainingVoiceSeconds();
 
   return (
     <div className="container mx-auto px-4 py-8 pb-20 max-w-6xl relative">
@@ -97,10 +101,10 @@ const Recommendations: React.FC = () => {
 
       {/* TABS */}
       <div className="flex flex-wrap justify-center mb-8 gap-2 bg-cine-gray p-1 rounded-full w-fit mx-auto border border-gray-800">
-          <button onClick={() => { setActiveTab('simple'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'simple' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
+          <button onClick={() => { stopLiveSession(); setActiveTab('simple'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'simple' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
               <Zap size={18} /> <span className="hidden sm:inline">Rápida</span>
           </button>
-          <button onClick={() => { setActiveTab('chat'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'chat' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
+          <button onClick={() => { stopLiveSession(); setActiveTab('chat'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'chat' ? 'bg-cine-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>
               <Bot size={18} /> <span className="hidden sm:inline">Chat</span>
           </button>
           <button onClick={() => { setActiveTab('live'); }} className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-all ${activeTab === 'live' ? 'bg-red-600 text-white shadow-lg animate-pulse' : 'text-gray-400 hover:text-white'}`}>
@@ -114,23 +118,50 @@ const Recommendations: React.FC = () => {
               <div className="flex flex-col items-center justify-center min-h-[500px] bg-cine-gray rounded-2xl border border-gray-800 p-8 relative overflow-hidden shadow-2xl animate-fade-in">
                   <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cine-gold/5 via-transparent to-transparent"></div>
                   
-                  {!liveSession.isConnected ? (
+                  {!canUseLive ? (
+                      // LOCKED SCREEN FOR REGULAR USERS
+                      <div className="text-center z-10 p-6 bg-black/60 rounded-xl backdrop-blur-sm border border-cine-gold/30">
+                          <div className="bg-black p-4 rounded-full inline-block mb-4 border border-gray-700">
+                              <Lock size={48} className="text-cine-gold" />
+                          </div>
+                          <h3 className="text-2xl font-bold text-white mb-2">Acceso Exclusivo VIP</h3>
+                          <p className="text-gray-400 max-w-md mx-auto mb-6">
+                              La línea directa de voz con la IA está reservada exclusivamente para el 
+                              <span className="text-cine-gold font-bold mx-1">Crítico #1 del Ranking</span> 
+                              (y el Administrador).
+                          </p>
+                          <div className="bg-cine-gold/10 p-4 rounded-lg border border-cine-gold/20 inline-block">
+                              <Trophy className="text-cine-gold mx-auto mb-2" size={24} />
+                              <p className="text-sm text-cine-gold font-bold">¡Escribe más reseñas para destronar al líder y ganar acceso!</p>
+                          </div>
+                      </div>
+                  ) : !liveSession.isConnected ? (
+                      // CONNECT SCREEN FOR VIPs
                       <div className="text-center z-10">
                           <div className="w-32 h-32 bg-black rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-gray-800 shadow-xl">
                               <Mic size={48} className="text-gray-500" />
                           </div>
                           <h3 className="text-2xl font-bold text-white mb-2">Conversación Natural</h3>
-                          <p className="text-gray-400 max-w-md mx-auto mb-8">
-                              Habla con la IA como si fuera una llamada real. Interrúmpela cuando quieras, no hace falta pulsar botones para hablar.
+                          <p className="text-gray-400 max-w-md mx-auto mb-6">
+                              Habla con la IA como si fuera una llamada real. Interrúmpela cuando quieras.
                           </p>
+                          
+                          {/* Limit Warning */}
+                          <div className="mb-6 text-sm font-mono bg-black/40 px-4 py-2 rounded-full border border-gray-700 inline-flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${remainingSeconds > 60 ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
+                              Tiempo restante hoy: {Math.floor(remainingSeconds / 60)}m {remainingSeconds % 60}s
+                          </div>
+
                           <button 
                             onClick={() => startLiveSession('general')}
-                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3"
+                            disabled={remainingSeconds <= 0 && !user?.isAdmin}
+                            className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3 disabled:opacity-50 disabled:grayscale"
                           >
-                              <Phone size={24} /> Iniciar Llamada
+                              <Phone size={24} /> {remainingSeconds > 0 || user?.isAdmin ? 'Iniciar Llamada' : 'Cupo Agotado'}
                           </button>
                       </div>
                   ) : (
+                      // ACTIVE CALL SCREEN
                       <div className="text-center z-10 w-full flex flex-col items-center">
                           {/* NEW VISUALIZER */}
                           <div className="mb-8 scale-125">
@@ -158,7 +189,7 @@ const Recommendations: React.FC = () => {
                   )}
               </div>
 
-              {/* VISUAL CONTENT POP-UP OVERLAY (Independent Scroll) */}
+              {/* VISUAL CONTENT POP-UP OVERLAY */}
               {liveSession.isConnected && (liveSession.visualContent.length > 0 || liveSession.toolInUse) && (
                   <div className="fixed top-20 right-4 w-80 max-h-[80vh] bg-black/80 backdrop-blur-xl border border-cine-gold/30 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50 animate-slide-in-right">
                       <div className="p-3 bg-black/60 border-b border-gray-700 flex justify-between items-center">

@@ -47,7 +47,7 @@ const TIME_CATEGORIES = [
 ];
 
 const Events: React.FC = () => {
-  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, liveSession, startLiveSession, stopLiveSession } = useData();
+  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, raiseHand, grantTurn, releaseTurn } = useData();
   const [generating, setGenerating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [startingDiscussion, setStartingDiscussion] = useState(false);
@@ -56,12 +56,21 @@ const Events: React.FC = () => {
   const chatRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // Voice Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  
+  // TTS & Audio Playback State
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true); // Default to listening enabled
+
   // Time Voting State
   const [expandedTimeCat, setExpandedTimeCat] = useState<string | null>(null);
 
   // Admin Preview State
   const [adminPreviewMode, setAdminPreviewMode] = useState(false);
-  const [adminDebatePreview, setAdminDebatePreview] = useState(false); // New state for debate simulation
+  const [adminDebatePreview, setAdminDebatePreview] = useState(false);
   const [adminTimePreview, setAdminTimePreview] = useState<{ chosenTime: string, message: string } | null>(null);
   const [simulatingTime, setSimulatingTime] = useState(false);
 
@@ -83,6 +92,113 @@ const Events: React.FC = () => {
       setAdminTimePreview(null);
       setExpandedTimeCat(null);
   }, [activeEvent?.id]);
+
+  // AUTO-PLAY AUDIO & TTS LOGIC
+  useEffect(() => {
+      if (eventMessages.length === 0 || !voiceEnabled) return;
+      
+      const lastMsg = eventMessages[eventMessages.length - 1];
+      // Only play if it's new (simple check: timestamp is recent < 5s)
+      if (Date.now() - lastMsg.timestamp > 5000) return;
+
+      const play = async () => {
+          setIsPlayingAudio(true);
+          
+          if (lastMsg.audioBase64) {
+              // --- PLAY HUMAN AUDIO ---
+              try {
+                  const audio = new Audio(`data:audio/webm;base64,${lastMsg.audioBase64}`);
+                  audio.onended = () => setIsPlayingAudio(false);
+                  await audio.play();
+              } catch (e) { console.error("Audio playback error", e); setIsPlayingAudio(false); }
+          } else if (lastMsg.role === 'moderator') {
+              // --- PLAY AI TTS ---
+              if ('speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                  const utterance = new SpeechSynthesisUtterance(lastMsg.text);
+                  utterance.lang = 'es-ES';
+                  utterance.rate = 1.1;
+                  utterance.onend = () => setIsPlayingAudio(false);
+                  window.speechSynthesis.speak(utterance);
+              } else {
+                  setIsPlayingAudio(false);
+              }
+          } else {
+              setIsPlayingAudio(false);
+          }
+      };
+      
+      play();
+  }, [eventMessages.length]);
+
+  // VOICE RECORDING HANDLERS
+  const startRecording = async () => {
+      try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mediaRecorder = new MediaRecorder(stream);
+          mediaRecorderRef.current = mediaRecorder;
+          audioChunksRef.current = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0) audioChunksRef.current.push(event.data);
+          };
+
+          mediaRecorder.start();
+          setIsRecording(true);
+          
+          // Also start speech recognition for text transcription
+          toggleDictation(); 
+
+      } catch (e) {
+          console.error("Mic error:", e);
+          alert("Error accediendo al micrófono.");
+      }
+  };
+
+  const stopRecordingAndSend = async () => {
+      if (!mediaRecorderRef.current || !activeEvent) return;
+
+      mediaRecorderRef.current.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+              const base64Audio = (reader.result as string).split(',')[1];
+              const textToSend = chatInput.trim() || "(Mensaje de voz)";
+              
+              await sendEventMessage(activeEvent.id, textToSend, 'user', base64Audio);
+              setChatInput('');
+              
+              // Release turn automatically after speaking
+              if (activeEvent.currentSpeakerId === user?.id) {
+                  releaseTurn(activeEvent.id);
+              }
+              
+              // Trigger AI logic
+              handleAIMentionLogic(textToSend);
+          };
+      };
+
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      // Stop dictation
+      // (Handled by toggleDictation logic usually)
+  };
+
+  // Dictation (STT) for transcription
+  const toggleDictation = () => {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'es-ES';
+      recognition.interimResults = true;
+      recognition.onresult = (event: any) => { 
+          if (event.results[0].isFinal) {
+              setChatInput(prev => prev + " " + event.results[0][0].transcript); 
+          }
+      };
+      recognition.start();
+  };
 
   // Load personalization
   useEffect(() => {
@@ -158,14 +274,9 @@ const Events: React.FC = () => {
       }, 2000);
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!chatInput.trim() || !activeEvent || !user) return;
-      const userText = chatInput;
-      setChatInput('');
-      try {
+  const handleAIMentionLogic = (userText: string) => {
+        if (!activeEvent || !user) return;
         const hasSpokenBefore = eventMessages.some(m => m.userId === user.id);
-        await sendEventMessage(activeEvent.id, userText);
         if (!hasSpokenBefore) { handleGreetNewUser(user.name, userText); return; }
         const mentionRegex = /@(ia|moderadora|bot|sistema)/i;
         const isMentioned = mentionRegex.test(userText);
@@ -175,6 +286,16 @@ const Events: React.FC = () => {
             const tempHistory = [...eventMessages.slice(-9).map(m => ({ userName: m.userName, text: m.text })), { userName: user.name, text: userText }];
             if (!isMentioned) setTimeout(() => handleCallModerator(tempHistory), 2000); else handleCallModerator(tempHistory);
         }
+  }
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!chatInput.trim() || !activeEvent || !user) return;
+      const userText = chatInput;
+      setChatInput('');
+      try {
+        await sendEventMessage(activeEvent.id, userText);
+        handleAIMentionLogic(userText);
       } catch (e) { console.error(String(e)); }
   };
 
@@ -190,12 +311,6 @@ const Events: React.FC = () => {
       const res = await decideBestTime(counts, winner?.title || 'la película', epNum);
       setAdminTimePreview(res);
       setSimulatingTime(false);
-  };
-
-  const handleStartVoiceDebate = () => {
-      if (!activeEvent || !activeEvent.winnerTmdbId) return;
-      const winnerTitle = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId)?.title || "la película";
-      startLiveSession('debate', { movieTitle: winnerTitle, themeTitle: activeEvent.themeTitle });
   };
 
   if (!activeEvent) {
@@ -272,7 +387,7 @@ const Events: React.FC = () => {
 
             {currentPhase === 'voting' && (
                 <div className="max-w-6xl mx-auto animate-fade-in pb-10">
-                    {/* Voting Content (Same as before) */}
+                    {/* ... (Same Voting UI) ... */}
                     <div className="bg-black/40 backdrop-blur-md border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6 shadow-lg">
                         <div className="flex-grow">
                              <div className="flex items-center gap-2 text-cine-gold font-bold text-lg mb-2"><Sparkles size={20}/> Elección de la Comunidad</div>
@@ -341,7 +456,7 @@ const Events: React.FC = () => {
                 <div className="max-w-5xl mx-auto animate-fade-in flex-grow flex flex-col relative">
                     {adminPreviewMode && <div className="absolute top-0 right-0 z-50"><button onClick={() => setAdminPreviewMode(false)} className="bg-white text-black font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2"><Eye size={18}/> Salir de Vista Previa</button></div>}
 
-                    {/* Viewing Content (Same as before) */}
+                    {/* ... (Same Viewing UI) ... */}
                     <div className="text-center mb-10">
                         <Trophy className="text-cine-gold mx-auto mb-4 animate-bounce" size={64} />
                         <h2 className="text-3xl font-bold text-white mb-2">¡TENEMOS GANADORA!</h2>
@@ -355,7 +470,7 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Final Date Announcement or Cancellation Card */}
+                    {/* Final Date Announcement */}
                     {(activeEvent.finalDebateDate || adminTimePreview) && (
                         <div className={`mb-10 relative overflow-hidden p-8 rounded-2xl border-4 text-center animate-fade-in shadow-[0_0_80px_rgba(0,0,0,0.8)] ${adminTimePreview?.chosenTime === 'CANCELLED' ? 'bg-black border-red-600' : 'bg-black border-cine-gold'}`}>
                             {adminTimePreview?.chosenTime === 'CANCELLED' ? (
@@ -363,21 +478,14 @@ const Events: React.FC = () => {
                                     <div className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#330000_10px,#330000_20px)] opacity-20"></div>
                                     <AlertTriangle className="text-red-600 mx-auto mb-4" size={64} />
                                     <h3 className="text-3xl font-black text-red-500 uppercase mb-2 tracking-widest">EMISIÓN CANCELADA</h3>
-                                    <p className="text-gray-400 italic text-lg max-w-2xl mx-auto relative z-10">
-                                        "{adminTimePreview.message}"
-                                    </p>
-                                    <p className="mt-4 text-xs text-red-700 font-mono">CODE: LOW_QUORUM_ERROR</p>
+                                    <p className="text-gray-400 italic text-lg max-w-2xl mx-auto relative z-10">"{adminTimePreview.message}"</p>
                                 </>
                             ) : (
                                 <>
                                     <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cine-gold/20 via-black to-black"></div>
                                     <p className="text-cine-gold text-xs font-black tracking-[0.5em] mb-4 relative z-10">CINE MENSA ORIGINALS PRESENTA</p>
-                                    <h3 className="text-4xl md:text-6xl font-black text-white uppercase mb-2 leading-none relative z-10 drop-shadow-[0_4px_0_rgba(212,175,55,0.5)]">
-                                        EPISODIO
-                                    </h3>
-                                    <p className="text-2xl text-cine-gold font-serif italic mb-6 relative z-10">
-                                        "{adminTimePreview ? adminTimePreview.message : activeEvent.debateDecisionMessage?.split('|')[1]}"
-                                    </p>
+                                    <h3 className="text-4xl md:text-6xl font-black text-white uppercase mb-2 leading-none relative z-10 drop-shadow-[0_4px_0_rgba(212,175,55,0.5)]">EPISODIO</h3>
+                                    <p className="text-2xl text-cine-gold font-serif italic mb-6 relative z-10">"{adminTimePreview ? adminTimePreview.message : activeEvent.debateDecisionMessage?.split('|')[1]}"</p>
                                     <div className="inline-block bg-cine-gold text-black px-6 py-2 font-black text-xl uppercase tracking-widest relative z-10 transform -rotate-2">
                                         {adminTimePreview ? adminTimePreview.chosenTime : activeEvent.debateDecisionMessage?.split('|')[0]}
                                     </div>
@@ -414,7 +522,7 @@ const Events: React.FC = () => {
                                     {activeEvent.committedDebaters?.map(uid => { const u = allUsers.find(user => user.id === uid); return u ? <img key={uid} src={u.avatarUrl} title={u.name} className="w-8 h-8 rounded-full border border-gray-600" /> : null; })}
                                 </div>
                                 <button onClick={() => toggleEventCommitment(activeEvent.id, 'debate')} className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${activeEvent.committedDebaters?.includes(user?.id || '') ? 'bg-cine-gold/20 text-cine-gold border border-cine-gold' : 'bg-gray-700 text-white hover:bg-white hover:text-black'}`}>
-                                    {activeEvent.committedDebaters?.includes(user?.id || '') ? <Check size={18}/> : <Hand size={18}/>} {activeEvent.committedDebaters?.includes(user?.id || '') ? 'Asistiré al debate' : 'Asistiré al debate'}
+                                    {activeEvent.committedDebaters?.includes(user?.id || '') ? <Check size={18}/> : <Hand size={18}/>} {activeEvent.committedDebaters?.includes(user?.id || '') ? 'Asistencia Confirmada' : 'Asistiré al debate'}
                                 </button>
                             </div>
 
@@ -451,7 +559,6 @@ const Events: React.FC = () => {
                                                                 const timeKey = `${cat.label.split(' ')[0]} ${hour}`;
                                                                 const votes = activeEvent.timeVotes?.[timeKey] || [];
                                                                 const isSelected = votes.includes(user?.id || '');
-                                                                
                                                                 return (
                                                                     <button
                                                                         key={hour}
@@ -473,17 +580,13 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
-                    {user?.isAdmin && !adminPreviewMode && !activeEvent.finalDebateDate && (
+                    {user?.isAdmin && !activeEvent.finalDebateDate && (
                         <div className="mt-12 text-center flex flex-col gap-4 items-center">
                             <button onClick={handleSimulateTimeDecision} disabled={simulatingTime} className="bg-purple-900/40 text-purple-300 border border-purple-500 px-6 py-3 rounded-full font-bold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
                                 {simulatingTime ? <Loader2 className="animate-spin"/> : '👁️'} Admin: Simular Decisión de Hora (Con IA)
                             </button>
                             <button onClick={() => setAdminDebatePreview(true)} className="bg-blue-600/40 text-blue-300 border border-blue-500 px-6 py-3 rounded-full font-bold hover:bg-blue-900 flex items-center gap-2">
                                 👁️ Admin: Simular Cineforum (Debate)
-                            </button>
-                            <button onClick={handleStartDiscussion} disabled={startingDiscussion} className="bg-cine-gold text-black px-8 py-4 rounded-full font-bold hover:bg-white transition-colors flex items-center gap-2 disabled:opacity-50 shadow-[0_0_20px_rgba(212,175,55,0.3)]">
-                                {startingDiscussion ? <Loader2 className="animate-spin" size={20}/> : <MessageCircle size={20}/>}
-                                {startingDiscussion ? 'Preparando Sala...' : 'Admin: Iniciar Debate Ahora'}
                             </button>
                         </div>
                     )}
@@ -496,54 +599,71 @@ const Events: React.FC = () => {
                     {adminDebatePreview && <div className="absolute top-16 right-0 z-[60] bg-purple-600 text-white font-bold px-4 py-1 rounded-l-lg shadow-lg">Simulación Admin</div>}
                     {adminDebatePreview && <button onClick={() => setAdminDebatePreview(false)} className="absolute top-16 left-0 z-[60] bg-white text-black font-bold px-4 py-1 rounded-r-lg shadow-lg">Salir Simulación</button>}
 
-                    {/* Visualizer and Pop-up for Voice Chat */}
-                    {liveSession.isConnected && (
-                        <div className="absolute top-0 inset-x-0 z-50 flex flex-col items-center pt-2 pointer-events-none">
-                            <div className="bg-black/80 backdrop-blur-md rounded-full px-6 py-2 border border-cine-gold/30 shadow-2xl flex items-center gap-4 pointer-events-auto">
-                                <div className="scale-50 -ml-4">
-                                    <AIVisualizer isUserSpeaking={liveSession.isUserSpeaking} isAiSpeaking={liveSession.isAiSpeaking} status="" size="sm" />
-                                </div>
-                                <span className="text-xs text-cine-gold font-bold uppercase tracking-wider">{liveSession.status}</span>
-                                <button onClick={stopLiveSession} className="bg-red-600 p-2 rounded-full text-white hover:bg-red-500 transition-colors"><PhoneOff size={14}/></button>
+                    {/* HEADER: AIVisualizer */}
+                    <div className="bg-black/80 backdrop-blur-md p-4 border-b border-gray-800 flex items-center justify-between z-50">
+                        <div className="flex items-center gap-4">
+                            <div className="scale-75">
+                                <AIVisualizer 
+                                    isUserSpeaking={isRecording} 
+                                    isAiSpeaking={isPlayingAudio} 
+                                    status="" 
+                                    size="sm" 
+                                />
                             </div>
-                            
-                            {/* Visual Content Pop-up */}
-                            {(liveSession.visualContent.length > 0 || liveSession.toolInUse) && (
-                                <div className="mt-2 w-72 max-h-[40vh] bg-black/90 backdrop-blur-xl border border-cine-gold/30 rounded-xl shadow-2xl overflow-y-auto custom-scrollbar p-3 animate-slide-in-top pointer-events-auto">
-                                    {liveSession.toolInUse && <div className="flex items-center gap-2 mb-2 text-xs text-cine-gold"><Loader2 size={10} className="animate-spin"/> {liveSession.toolInUse}</div>}
-                                    {liveSession.visualContent.map((item, idx) => (
-                                        <div key={idx} className="mb-3 last:mb-0">
-                                            {item.type === 'movie' ? <div className="transform scale-90 origin-top-left"><MovieCard movie={item.data} showRatingInput={false} /></div> : (
-                                                <div className="flex items-center gap-3 bg-cine-gray p-2 rounded-lg border border-gray-700">
-                                                    <img src={getImageUrl(item.data.profile_path, 'w200')} className="w-10 h-10 rounded-full object-cover" />
-                                                    <span className="text-xs text-white font-bold">{item.data.name}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                    <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
-                                </div>
+                            <div>
+                                <h3 className="font-bold text-white flex items-center gap-2"><Radio className="text-red-500 animate-pulse" size={16}/> EN EL AIRE</h3>
+                                <p className="text-xs text-cine-gold">Debate en Vivo</p>
+                            </div>
+                        </div>
+                        
+                        {/* Audio Controls */}
+                        <button 
+                            onClick={() => setVoiceEnabled(!voiceEnabled)}
+                            className={`p-2 rounded-full border transition-all ${voiceEnabled ? 'bg-cine-gold text-black border-cine-gold' : 'bg-transparent text-gray-500 border-gray-700'}`}
+                            title="Activar/Desactivar Audio"
+                        >
+                            {voiceEnabled ? <Volume2 size={20}/> : <VolumeX size={20}/>}
+                        </button>
+                    </div>
+
+                    {/* TURN MANAGEMENT UI */}
+                    <div className="bg-black/60 p-2 border-b border-gray-800 flex justify-between items-center text-xs px-4">
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-400">Turno actual:</span>
+                            {activeEvent.currentSpeakerId ? (
+                                <span className="font-bold text-green-400 flex items-center gap-1">
+                                    <Mic size={12}/> {allUsers.find(u => u.id === activeEvent.currentSpeakerId)?.name || 'Usuario'}
+                                </span>
+                            ) : (
+                                <span className="text-gray-500 italic">Nadie (Micrófono libre)</span>
                             )}
                         </div>
-                    )}
+                        
+                        {activeEvent.currentSpeakerId === user?.id ? (
+                            <button 
+                                onMouseDown={startRecording}
+                                onMouseUp={stopRecordingAndSend}
+                                onTouchStart={startRecording}
+                                onTouchEnd={stopRecordingAndSend}
+                                className="bg-red-600 hover:bg-red-500 text-white font-bold px-6 py-2 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse flex items-center gap-2 transition-all active:scale-95 select-none"
+                            >
+                                <Mic size={16}/> {isRecording ? 'GRABANDO... (Suelta para enviar)' : 'MANTÉN PARA HABLAR'}
+                            </button>
+                        ) : activeEvent.speakerQueue?.includes(user?.id || '') ? (
+                            <span className="text-yellow-500 font-bold flex items-center gap-1"><Hand size={14}/> Esperando turno... ({activeEvent.speakerQueue.indexOf(user?.id || '') + 1})</span>
+                        ) : (
+                            <button onClick={() => raiseHand(activeEvent.id)} className="text-gray-300 hover:text-white flex items-center gap-1 hover:bg-white/10 px-2 py-1 rounded transition-colors">
+                                <Hand size={14}/> Pedir Palabra
+                            </button>
+                        )}
 
-                    <div className="bg-black/40 p-4 border-b border-gray-800 flex justify-between items-center flex-shrink-0">
-                         <div className="flex items-center gap-3">
-                             <div className="relative"><MessageCircle className="text-cine-gold" size={24} /><span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse"></span></div>
-                             <div><h3 className="font-bold text-white">Sala de Debate: En Vivo</h3><p className="text-xs text-gray-400">Moderado por IA</p></div>
-                         </div>
-                         <div className="flex items-center gap-2">
-                             {!liveSession.isConnected && (
-                                 <button 
-                                    onClick={handleStartVoiceDebate} 
-                                    className="text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-full font-bold flex items-center gap-2 shadow-[0_0_15px_rgba(22,163,74,0.4)] transition-all animate-pulse"
-                                 >
-                                     <Mic size={14}/> 🎙️ Entrar en Directo
-                                 </button>
-                             )}
-                             {user?.isAdmin && <button onClick={() => handleCallModerator()} disabled={modThinking} className="text-xs bg-cine-gold/20 text-cine-gold px-3 py-1 rounded border border-cine-gold/30 hover:bg-cine-gold/30 disabled:opacity-50">{modThinking ? 'IA Pensando...' : 'Invocar Moderadora'}</button>}
-                         </div>
+                        {user?.isAdmin && activeEvent.speakerQueue && activeEvent.speakerQueue.length > 0 && !activeEvent.currentSpeakerId && (
+                            <button onClick={() => grantTurn(activeEvent.id, activeEvent.speakerQueue![0])} className="bg-blue-600 text-white px-2 py-1 rounded ml-2">
+                                Dar turno a {allUsers.find(u => u.id === activeEvent.speakerQueue![0])?.name}
+                            </button>
+                        )}
                     </div>
+
                     <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4 space-y-4 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] custom-scrollbar">
                         {eventMessages.map(msg => {
                             const isMe = msg.userId === user?.id;
@@ -554,6 +674,12 @@ const Events: React.FC = () => {
                                         <div className="flex-shrink-0 flex flex-col items-center"><img src={msg.userAvatar} className={`w-8 h-8 rounded-full border ${isMod ? 'border-cine-gold' : 'border-gray-700'}`} alt="Avatar" />{isMod && <span className="text-[10px] text-cine-gold font-bold mt-1">HOST</span>}</div>
                                         <div className={`p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : isMod ? 'bg-black/80 text-cine-gold border border-cine-gold rounded-tl-none shadow-[0_0_15px_rgba(212,175,55,0.15)]' : 'bg-gray-700 text-white border border-gray-600 rounded-tl-none'}`}>
                                             {!isMe && !isMod && <p className="text-xs text-gray-400 font-bold mb-1">{msg.userName}</p>}
+                                            {msg.audioBase64 && (
+                                                <div className="flex items-center gap-2 mb-2 text-xs bg-black/20 p-1 rounded px-2 w-fit">
+                                                    <Mic size={12} className="text-green-400"/> 
+                                                    <span>Mensaje de voz</span>
+                                                </div>
+                                            )}
                                             <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                                         </div>
                                     </div>
@@ -566,6 +692,7 @@ const Events: React.FC = () => {
                     <div className="p-3 bg-black/80 border-t border-gray-800 flex-shrink-0">
                         <form onSubmit={handleSendMessage} className="flex gap-2">
                             <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Escribe tu opinión... (@ia para preguntar al host)" className="flex-grow bg-gray-900 border border-gray-700 rounded-full px-4 py-3 text-white focus:border-cine-gold outline-none text-sm" />
+                            <button type="button" onClick={toggleDictation} className="p-3 text-gray-400 hover:text-white"><Mic size={20}/></button>
                             <button type="submit" disabled={!chatInput.trim()} className="bg-cine-gold text-black p-3 rounded-full hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100"><Send size={20} /></button>
                         </form>
                     </div>

@@ -26,6 +26,9 @@ export interface User {
   watchlist: string[]; // Array of Movie IDs
   status: UserStatus;
   isAdmin: boolean;
+  // Usage tracking for Voice Limits
+  voiceUsageDate?: number; // Timestamp of last usage day
+  voiceUsageSeconds?: number; // Seconds used today
 }
 
 export interface DetailedRating {
@@ -85,8 +88,9 @@ export interface EventMessage {
   userName: string;
   userAvatar: string;
   text: string;
+  audioBase64?: string; // New field for Real Human Voice
   timestamp: number;
-  role?: 'user' | 'moderator' | 'system'; // Added role for AI Host
+  role?: 'user' | 'moderator' | 'system'; 
 }
 
 export interface CineEvent {
@@ -112,6 +116,10 @@ export interface CineEvent {
   timeVotes?: Record<string, string[]>; // Key: "Friday_22", Value: Array of UserIDs
   finalDebateDate?: number; // Timestamp of the chosen date
   debateDecisionMessage?: string; // AI explanation of the time choice
+
+  // Debate Turn Management
+  speakerQueue?: string[]; // UserIDs waiting to speak
+  currentSpeakerId?: string | null; // UserID currently holding the mic
 }
 
 export interface ChatMessage {
