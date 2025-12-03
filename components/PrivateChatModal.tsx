@@ -9,6 +9,9 @@ const PrivateChatModal: React.FC = () => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
+  
+  // Close confirmation state
+  const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,10 +51,17 @@ const PrivateChatModal: React.FC = () => {
       }, 2000);
   };
 
-  const handleClose = () => {
+  const handleClose = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      
       if (isCreator) {
-          if (window.confirm("¿Cerrar la sala? Se desconectará al otro usuario.")) {
+          if (confirmClose) {
               closePrivateChat();
+              setConfirmClose(false);
+          } else {
+              setConfirmClose(true);
+              // Auto reset confirmation after 3s
+              setTimeout(() => setConfirmClose(false), 3000);
           }
       } else {
           leavePrivateChat();
@@ -85,10 +95,21 @@ const PrivateChatModal: React.FC = () => {
           </div>
           <button 
             onClick={handleClose}
-            className="text-gray-400 hover:text-red-500 transition-colors p-2 hover:bg-white/10 rounded-full"
+            className={`transition-all p-2 rounded-full flex items-center justify-center gap-1 ${
+                confirmClose 
+                ? 'bg-red-600 text-white w-auto px-3 shadow-lg shadow-red-900/50 hover:bg-red-700' 
+                : 'text-gray-400 hover:text-red-500 hover:bg-white/10'
+            }`}
             title={isCreator ? "Cerrar Sala para todos" : "Salir de la sala"}
           >
-              {isCreator ? <X size={20} /> : <LogOut size={20}/>}
+              {confirmClose ? (
+                  <>
+                      <span className="text-[10px] font-bold">¿CERRAR?</span>
+                      <X size={16} />
+                  </>
+              ) : (
+                  isCreator ? <X size={20} /> : <LogOut size={20}/>
+              )}
           </button>
       </div>
 

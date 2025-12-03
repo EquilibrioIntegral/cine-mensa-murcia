@@ -274,11 +274,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   }
                   return { session: sessionData, messages: [] };
               });
-
-              // Sub-listener for messages if this is a NEW chat session load
-              // NOTE: In a real optimized app, we would manage the message listener separately to avoid re-subscribing on every session update (typing)
-              // But for this scale, we can just ensure we only subscribe when the ID changes.
-              // To do that properly, we should move the message listener to a separate useEffect or verify ID.
           } else {
               setActivePrivateChat(null);
           }
@@ -445,7 +440,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubRatings = onSnapshot(collection(db, 'ratings'), (snap) => {
           setUserRatings(snap.docs.map(d => d.data() as UserRating));
       });
-      // CRITICAL FIX: Ensure ID is included in News and Feedback items from addDoc
       const unsubNews = onSnapshot(query(collection(db, 'news'), orderBy('timestamp', 'desc')), (snap) => {
           setNews(snap.docs.map(d => ({ ...d.data(), id: d.id } as NewsItem)));
       });
@@ -453,7 +447,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setFeedbackList(snap.docs.map(d => ({ ...d.data(), id: d.id } as AppFeedback)));
       });
       
-      // Active Event
       const qEvent = query(collection(db, 'events'), where('phase', '!=', 'closed'));
       const unsubEvent = onSnapshot(qEvent, (snap) => {
           if (!snap.empty) {
@@ -464,18 +457,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
       });
       
-      // TMDB Token
       const unsubConfig = onSnapshot(doc(db, 'config', 'tmdb'), (docSnap) => {
          if (docSnap.exists()) {
              setTmdbTokenState(docSnap.data().token);
          }
       });
       
-      // Listen to Automation Config changes real-time
       const unsubAuto = onSnapshot(doc(db, 'config', 'news_automation'), (docSnap) => {
           if (docSnap.exists()) {
               const d = docSnap.data();
-              // Verify if date is today, if not, UI should show 0 (even if DB isn't updated yet)
               const todayStr = new Date().toLocaleDateString('es-ES');
               const isToday = d.currentDate === todayStr;
               
@@ -506,7 +496,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   }, [user?.id]);
 
-  // Event Messages
   useEffect(() => {
       if (activeEvent) {
           const qMessages = query(collection(db, `events/${activeEvent.id}/messages`), orderBy('timestamp', 'asc'));
@@ -519,7 +508,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   }, [activeEvent?.id]);
 
-  // --- WELCOME MODAL LOGIC ---
   useEffect(() => {
       if (user && user.status === 'active' && !user.hasSeenWelcome) {
           const rank1Title = RANKS.find(r => r.minLevel === 1)?.title || 'Espectador Novato';
@@ -540,7 +528,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   };
 
-  // --- ECONOMY ENGINE ---
   const earnCredits = async (amount: number, reason: string) => {
       if (!user) return;
       try {
@@ -554,12 +541,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!user) return false;
       const canAfford = (user.credits || 0) >= amount;
       
-      // Strict deduction policy: Everyone must pay, including admins
       if (!canAfford) {
           return false;
       }
       try {
-          const newCredits = (user.credits || 0) - amount; // Always deduct amount
+          const newCredits = (user.credits || 0) - amount; 
           await updateDoc(doc(db, 'users', user.id), {
               credits: newCredits,
               inventory: arrayUnion(itemId)
@@ -572,7 +558,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (e) { console.error("Error spending credits", e); return false; }
   };
 
-  // ADMIN TOGGLE: Give/Remove item without cost
   const toggleInventoryItem = async (itemId: string) => {
       if (!user) return;
       try {
@@ -590,19 +575,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   };
 
-  // --- GAMIFICATION ENGINE ---
-  // Updated: Filter actions by lastLevelUpTimestamp for relative progression
   const checkAchievements = async (currentUser: User) => {
       if (!currentUser) return;
       
       const adminResetDate = currentUser.lastGamificationReset || 0;
-      // KEY CHANGE: Use level timestamp to filter new actions
       const levelStartTime = currentUser.lastLevelUpTimestamp || 0;
-      
-      // Use the LATEST of the two reset markers for consistent stats within the current level
       const filterTimestamp = Math.max(adminResetDate, levelStartTime);
 
-      // Filter ratings/reviews that happened AFTER the last level up
       const myRatingsRelative = userRatings.filter(r => r.userId === currentUser.id && r.timestamp > filterTimestamp);
       
       const stats = {
@@ -640,8 +619,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                newXp += mission.xpReward;
           } else {
               const rank = RANKS.find(r => r.id === mission.rankId);
-              // Missions are visible if user level >= rank min level
-              // Special case: Rank 1 missions can have specific level requirements internally
               const currentLevel = currentUser.level || 1;
 
               if (rank && (currentLevel >= rank.minLevel)) {
@@ -668,7 +645,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   };
 
-  // --- CHECK FOR LEVEL UP READINESS ---
   useEffect(() => {
       if (!user) return;
       const currentLevel = user.level || 1;
@@ -688,7 +664,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user?.xp, user?.level]);
 
 
-  // --- MANUAL LEVEL UP EXECUTION ---
   const completeLevelUpChallenge = async (nextLevel: number, rewardCredits: number) => {
       if (!user) return;
       const oldLevel = user.level || 1;
@@ -698,11 +673,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const batch = writeBatch(db);
               const userRef = doc(db, 'users', user.id);
               
-              // KEY CHANGE: Update timestamp and clear stats to start fresh for new level missions
               batch.update(userRef, {
                   level: nextLevel,
                   lastLevelUpTimestamp: Date.now(),
-                  gamificationStats: {}, // Reset counters for next level
+                  gamificationStats: {}, 
                   credits: (user.credits || 0) + rewardCredits
               });
               
@@ -725,17 +699,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const triggerAction = async (action: string) => {
       if (!user) return;
       
-      // We update the local state first for immediate UI feedback if needed, but Firestore is source of truth
       const currentStats = user.gamificationStats || {};
       
-      // If it's a boolean flag and already true, skip
       if (typeof currentStats[action] === 'boolean' && currentStats[action]) return;
 
       try {
         await updateDoc(doc(db, 'users', user.id), {
             [`gamificationStats.${action}`]: true
         });
-        // Optimistic update
         const updatedUser = { 
             ...user, 
             gamificationStats: { ...currentStats, [action]: true } 
@@ -745,7 +716,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (e) { console.error("Error triggering action", e); }
   };
 
-  // ADMIN: Reset
   const resetGamification = async () => {
       const usersSnap = await getDocs(collection(db, 'users'));
       if (usersSnap.empty) { alert("No hay usuarios."); return; }
@@ -776,13 +746,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetAutomation = async () => {
       await setDoc(doc(db, 'config', 'news_automation'), {
-          lastRun: 0, // Reset timer so it runs immediately
+          lastRun: 0, 
           dailyCount: 0,
           currentDate: new Date().toLocaleDateString('es-ES'),
           isGenerating: false,
           bannedTitles: []
       });
-      setAutomationStatus({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false }); // Update local
+      setAutomationStatus({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false }); 
   };
 
   useEffect(() => {
@@ -791,7 +761,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearNotification = () => setNotification(null);
 
-  // --- TOP CRITIC ---
   useEffect(() => {
       if (allUsers.length > 0 && userRatings.length > 0) {
           const stats = allUsers
@@ -993,31 +962,45 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       try {
           await setDoc(doc(db, 'private_chats', chatId), sessionData);
-          // Set local state immediately for responsiveness
           setActivePrivateChat({ session: sessionData, messages: [] });
       } catch (e) { console.error("Error creating chat", e); }
   };
 
+  // IMPROVED CLOSE LOGIC
   const closePrivateChat = async () => {
       if (!activePrivateChat) return;
+      
+      const chatId = activePrivateChat.session.id; // Capture ID immediately
+      const currentUserName = user?.name || "Anfitrión";
+      const currentUserId = user?.id || "system";
+
       try {
-          // 1. Send system message
-          await sendPrivateMessage("La sala ha sido cerrada por el anfitrión.", 'system');
+          // 1. Send system message DIRECTLY to ensure it goes to the correct collection
+          const msg: PrivateChatMessage = {
+              id: `msg_${Date.now()}`,
+              senderId: currentUserId,
+              senderName: currentUserName,
+              text: "La sala ha sido cerrada por el anfitrión.",
+              timestamp: Date.now(),
+              type: 'system'
+          };
+          await addDoc(collection(db, `private_chats/${chatId}/messages`), msg);
           
-          // 2. Wait a moment for UI to update then disable
+          // 2. Wait a moment then disable room
           setTimeout(async () => {
-              await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), { isActive: false });
-              setActivePrivateChat(null);
-          }, 500);
+              try {
+                await updateDoc(doc(db, 'private_chats', chatId), { isActive: false });
+                setActivePrivateChat(null);
+              } catch(err) { console.error(err); }
+          }, 2000); 
+          
       } catch(e) { console.error("Error closing chat", e); }
   };
 
   const leavePrivateChat = async () => {
       if (!user || !activePrivateChat) return;
       try {
-          // 1. Send system message
           await sendPrivateMessage(`${user.name} ha abandonado la sala.`, 'system');
-          // 2. Just clear local state, don't delete doc (only creator can close)
           setActivePrivateChat(null);
       } catch(e) { console.error("Error leaving chat", e); }
   };
@@ -1071,10 +1054,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               lastLevelUpTimestamp: Date.now() 
           };
           await setDoc(doc(db, 'users', cred.user.uid), newUser);
-          
-          // CRITICAL: Force sign out immediately after registration to prevent auto-login
           await signOut(auth);
-          
           return { success: true, message: 'Registro exitoso. Tu cuenta está pendiente de aprobación por un administrador. Podrás acceder cuando sea validada.' };
       } catch (e: any) { return { success: false, message: e.message }; }
   };
@@ -1117,11 +1097,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (dislikes.includes(user.id)) { await updateDoc(ratingRef, { dislikes: arrayRemove(user.id) }); } else { await updateDoc(ratingRef, { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) }); }
       }
       
-      // Increment Social Interaction Counter for missions
       await updateDoc(doc(db, 'users', user.id), {
           'gamificationStats.social_interactions': increment(1)
       });
-      // Check immediately
       const u = { ...user, gamificationStats: { ...user.gamificationStats, social_interactions: (user.gamificationStats?.social_interactions || 0) + 1 } };
       checkAchievements(u);
   };
@@ -1144,12 +1122,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendFeedback = async (type: 'bug' | 'feature', text: string) => {
       if (!user) return;
       await addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() });
-      
-      // Increment Feedback Counter for missions
       await updateDoc(doc(db, 'users', user.id), {
           'gamificationStats.feedback_count': increment(1)
       });
-      // Check
       const u = { ...user, gamificationStats: { ...user.gamificationStats, feedback_count: (user.gamificationStats?.feedback_count || 0) + 1 } };
       checkAchievements(u);
   };
@@ -1158,19 +1133,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteFeedback = async (id: string) => { await deleteDoc(doc(db, 'feedback', id)); };
   const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => { await addDoc(collection(db, 'news'), { title, content, type, imageUrl, timestamp: Date.now() }); };
   
-  // NEW METHOD: Delete with Blacklist
   const deleteNews = async (id: string) => { 
       try {
-          // 1. Get the news item to find its title
           const newsRef = doc(db, 'news', id);
           const snap = await getDoc(newsRef);
           
           if (snap.exists()) {
               const newsData = snap.data();
-              // 2. Add title to banned list in config
               if (newsData.title) {
                   const configRef = doc(db, 'config', 'news_automation');
-                  // Ensure config doc exists
                   const configSnap = await getDoc(configRef);
                   if (configSnap.exists()) {
                       await updateDoc(configRef, {
@@ -1181,8 +1152,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   }
               }
           }
-
-          // 3. Delete the news
           await deleteDoc(newsRef); 
       } catch (e) {
           console.error("Error deleting news:", e);
