@@ -947,23 +947,49 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const targetUser = allUsers.find(u => u.id === targetUserId);
       if (!targetUser) return;
 
+      // Canonical ID: Ensure strictly one ID per pair of users (A_B or B_A)
       const chatId = user.id < targetUserId ? `${user.id}_${targetUserId}` : `${targetUserId}_${user.id}`;
-      
-      const sessionData: PrivateChatSession = {
-          id: chatId,
-          creatorId: user.id,
-          targetId: targetUserId,
-          creatorName: user.name,
-          targetName: targetUser.name,
-          isActive: true,
-          createdAt: Date.now(),
-          typing: {}
-      };
+      const chatRef = doc(db, 'private_chats', chatId);
 
       try {
-          await setDoc(doc(db, 'private_chats', chatId), sessionData);
-          setActivePrivateChat({ session: sessionData, messages: [] });
-      } catch (e) { console.error("Error creating chat", e); }
+          // 1. Check if chat already exists
+          const chatSnap = await getDoc(chatRef);
+
+          if (chatSnap.exists()) {
+              const data = chatSnap.data() as PrivateChatSession;
+              
+              if (data.isActive) {
+                  // 2a. If ACTIVE, just open it locally without touching Firestore
+                  // This prevents overwriting the session if it's already running
+                  setActivePrivateChat({ session: { ...data, id: chatId }, messages: [] });
+                  // The useEffect listener will fetch messages automatically
+              } else {
+                  // 2b. If INACTIVE (closed previously), Reactivate it
+                  // We update the creator to the current user so they have control
+                  await updateDoc(chatRef, {
+                      isActive: true,
+                      creatorId: user.id,
+                      targetId: targetUserId,
+                      creatorName: user.name,
+                      targetName: targetUser.name,
+                      typing: {} // Reset typing status
+                  });
+              }
+          } else {
+              // 3. If DOES NOT EXIST, Create new
+              const sessionData: PrivateChatSession = {
+                  id: chatId,
+                  creatorId: user.id,
+                  targetId: targetUserId,
+                  creatorName: user.name,
+                  targetName: targetUser.name,
+                  isActive: true,
+                  createdAt: Date.now(),
+                  typing: {}
+              };
+              await setDoc(chatRef, sessionData);
+          }
+      } catch (e) { console.error("Error creating/joining chat", e); }
   };
 
   // IMPROVED CLOSE LOGIC
