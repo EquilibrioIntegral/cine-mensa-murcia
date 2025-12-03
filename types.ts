@@ -200,7 +200,7 @@ export interface LevelChallenge {
     title: string;
     synopsis: string; // Narrative description
     imagePrompt: string; // For AI generation of the poster
-    type: 'trivia' | 'boss'; // Logic type
+    type: 'trivia' | 'boss' | 'timeline'; // Logic type
     rewardCredits: number;
     passingScore: number; // e.g., 16 out of 20
     questions?: TriviaQuestion[];

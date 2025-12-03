@@ -1,4 +1,3 @@
-
 import { Movie, UserRating, Rank, Mission, User, ShopItem, LevelChallenge } from "./types";
 import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot, MessageCircle } from 'lucide-react';
 
@@ -61,7 +60,7 @@ export const LEVEL_CHALLENGES: LevelChallenge[] = [
     { 
         level: 2, 
         title: "Descubriendo que amo el cine", 
-        synopsis: "Acabas de conseguir tu primer empleo en el viejo Cine Capitol. El olor a palomitas inunda el vestíbulo y el proyector zumba como un corazón mecánico. Mientras acomodas a los clientes, estos te ponen a prueba con preguntas sobre los clásicos que se proyectan. ¿Podrás demostrar que no eres un simple vendedor de entradas, sino un verdadero conocedor?", 
+        synopsis: "Consigues trabajo en el Cine Capitol. Mientras cortas entradas y hueles las palomitas, los clientes te ponen a prueba con preguntas sobre clásicos. Si respondes bien, te dejarán propinas (Créditos) que podrás ahorrar para tu futuro.", 
         imagePrompt: "vintage cinema entrance hall, young usher 1980s style holding popcorn bucket, warm cinematic lighting, movie posters on walls, magical atmosphere, hyperrealistic",
         type: 'trivia', 
         rewardCredits: 100,
@@ -210,52 +209,17 @@ export const LEVEL_CHALLENGES: LevelChallenge[] = [
         ]
     },
     
-    // RETO NIVEL 3
+    // RETO NIVEL 3 - NUEVO (TIMELINE)
     { 
         level: 3, 
-        title: "El Cuarto Oscuro", 
-        synopsis: "Te han dejado solo en la sala de revelado. Tienes que identificar escenas icónicas solo por sus negativos antes de que se velen.",
-        imagePrompt: "darkroom photography developing room red light, hanging film strips, mysterious atmosphere, cinematic composition",
-        type: 'trivia', 
-        rewardCredits: 150,
-        passingScore: 8 
-    },
-
-    // RETO NIVEL 4
-    { 
-        level: 4, 
-        title: "La Banda Sonora de tu Vida", 
-        synopsis: "El pianista del cine mudo ha enfermado. Tienes que elegir la música adecuada para cada escena o el público te abucheará.",
-        imagePrompt: "old piano in a silent movie theater, spotlight on empty stool, sheet music flying, sepia tone",
-        type: 'trivia', 
-        rewardCredits: 200,
-        passingScore: 8 
-    },
-    
-    // RANGO 2: Proyeccionista (Nivel 5)
-    { 
-        level: 5, 
-        title: "EL GRAN ESTRENO", 
-        synopsis: "Noche de gala. El proyector se ha atascado y el director está en la sala. Arregla el desastre respondiendo preguntas técnicas extremas.",
-        imagePrompt: "movie premiere red carpet chaos, paparazzi flashes, art deco cinema exterior night, nervous projectionist silhouette",
-        type: 'boss', 
-        rewardCredits: 500,
-        passingScore: 9 // Bosses are harder
-    },
+        title: "Comprar un Proyector", 
+        synopsis: "Tras trabajar en el cine, decides montar tu propio 'Cine en Casa'. Vas a ver a un viejo montador que conociste, con la esperanza de comprarle un proyector usado. Su taller es un caos: tiene el suelo lleno de tiras de celuloide desordenadas. Si le ayudas a ordenar las escenas de 3 películas cronológicamente, te regalará el proyector y 100 créditos por el trabajo. (Requisito: Tener al menos 5 películas vistas en tu historial).",
+        imagePrompt: "messy film editor room, strips of celluloid film on the floor, vintage film projector on a table, dust motes in light beam, atmospheric clutter, cinematic lighting",
+        type: 'timeline', 
+        rewardCredits: 100,
+        passingScore: 3 // Needs to pass 3 movies
+    }
 ];
-
-// Auto-fill generic challenges for higher levels
-for (let i = 6; i <= 100; i++) {
-    LEVEL_CHALLENGES.push({
-        level: i,
-        title: `Episodio ${i}: El Rodaje Continúa`,
-        synopsis: "Sigue demostrando tu valía en el set de rodaje para ascender en la jerarquía de Hollywood.",
-        imagePrompt: `movie set production behind the scenes clapperboard level ${i}, cinematic lighting`,
-        type: i % 5 === 0 ? 'boss' : 'trivia',
-        rewardCredits: i * 50,
-        passingScore: 8
-    });
-}
 
 export const RANKS: Rank[] = [
     { id: 'rank_1', title: 'Espectador Novato', minLevel: 1, color: 'text-gray-500', icon: Ticket },

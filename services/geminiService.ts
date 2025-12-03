@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User, TriviaQuestion } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
@@ -10,6 +11,55 @@ const ai = new GoogleGenAI({ apiKey });
 // Helper to check if API is usable
 const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
+};
+
+// --- TIMELINE GENERATOR (NEW) ---
+export const generateTimelineScenes = async (movieTitle: string): Promise<{ id: number, description: string }[]> => {
+    if (!isAiAvailable()) return [];
+
+    const prompt = `
+        Genera 10 momentos o escenas CLAVE de la película "${movieTitle}" en ORDEN CRONOLÓGICO estricto (de principio a fin).
+        
+        REQUISITOS:
+        1. Las descripciones deben ser breves (máx 20 palabras).
+        2. No numeres el texto de la descripción.
+        3. Deben ser distinguibles y representar el flujo de la historia.
+        4. "id" debe ser el número de orden (1 a 10).
+        
+        Formato JSON array:
+        [
+            { "id": 1, "description": "El protagonista encuentra el mapa..." },
+            ...
+            { "id": 10, "description": "Créditos finales..." }
+        ]
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.INTEGER },
+                            description: { type: Type.STRING }
+                        },
+                        required: ["id", "description"]
+                    }
+                }
+            }
+        });
+
+        if (!response.text) return [];
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Timeline Gen Error:", String(e));
+        return [];
+    }
 };
 
 // --- TRIVIA GENERATOR (NEW) ---

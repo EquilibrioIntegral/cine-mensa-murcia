@@ -2,10 +2,11 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { LEVEL_CHALLENGES, XP_TABLE } from '../constants';
-import { Gamepad2, Lock, Play, Ticket, HelpCircle, Trophy, Star, ChevronDown, CheckCircle, Skull, X, AlertTriangle } from 'lucide-react';
+import { Gamepad2, Lock, Play, Ticket, HelpCircle, Trophy, Star, ChevronDown, CheckCircle, Skull, X, AlertTriangle, Shield } from 'lucide-react';
 import RankBadge from '../components/RankBadge';
 import { LevelChallenge, ViewState } from '../types';
 import TriviaGame from '../components/TriviaGame';
+import TimelineGame from '../components/TimelineGame'; // Import new game
 
 const Arcade: React.FC = () => {
   const { user, completeLevelUpChallenge, setView } = useData();
@@ -19,6 +20,17 @@ const Arcade: React.FC = () => {
 
   const handleStartGame = () => {
       if (!selectedChallenge) return;
+
+      // Special Check for Timeline Game (Level 3)
+      if (selectedChallenge.type === 'timeline') {
+          const watchedCount = user.watchedMovies.length;
+          // ADMIN BYPASS: Allow admins to play even with 0 movies
+          if (watchedCount < 5 && !user.isAdmin) {
+              alert(`Necesitas haber visto al menos 5 películas para este reto. Llevas ${watchedCount}.`);
+              return;
+          }
+      }
+
       setIsPlaying(true);
   };
 
@@ -33,7 +45,7 @@ const Arcade: React.FC = () => {
           if (currentLevel < selectedChallenge.level) {
               completeLevelUpChallenge(selectedChallenge.level, selectedChallenge.rewardCredits);
           } else {
-              // Replay logic handled visually in TriviaGame
+              // Replay logic handled visually in Game
           }
       }
 
@@ -48,11 +60,19 @@ const Arcade: React.FC = () => {
       
       {/* GAME OVERLAY */}
       {isPlaying && selectedChallenge && (
-          <TriviaGame 
-              challenge={selectedChallenge}
-              onComplete={handleGameComplete}
-              onClose={() => setIsPlaying(false)}
-          />
+          selectedChallenge.type === 'timeline' ? (
+              <TimelineGame 
+                  challenge={selectedChallenge}
+                  onComplete={handleGameComplete}
+                  onClose={() => setIsPlaying(false)}
+              />
+          ) : (
+              <TriviaGame 
+                  challenge={selectedChallenge}
+                  onComplete={handleGameComplete}
+                  onClose={() => setIsPlaying(false)}
+              />
+          )
       )}
 
       <div className="text-center mb-8 md:mb-12">
@@ -103,8 +123,10 @@ const Arcade: React.FC = () => {
                       
                       <div className="flex flex-wrap items-center gap-3 md:gap-4 mb-4 md:mb-6 text-xs md:text-sm text-gray-400">
                           <span className="bg-gray-800 px-2 py-1 rounded text-white font-bold">Nivel {selectedChallenge.level}</span>
-                          <span className="flex items-center gap-1"><Star size={14} className="text-cine-gold"/> Mín: <span className="text-white font-bold">{selectedChallenge.passingScore}/20</span></span>
-                          <span className="uppercase bg-black/40 px-2 py-1 rounded border border-gray-700">{selectedChallenge.type === 'boss' ? 'Jefe Final' : 'Trivial'}</span>
+                          <span className="flex items-center gap-1"><Star size={14} className="text-cine-gold"/> Mín: <span className="text-white font-bold">{selectedChallenge.passingScore}</span></span>
+                          <span className="uppercase bg-black/40 px-2 py-1 rounded border border-gray-700">
+                              {selectedChallenge.type === 'timeline' ? 'Juego de Mesa' : selectedChallenge.type === 'boss' ? 'Jefe Final' : 'Trivial'}
+                          </span>
                       </div>
 
                       <div className="mb-6 relative flex-grow">
@@ -128,13 +150,22 @@ const Arcade: React.FC = () => {
                               onClick={handleStartGame}
                               className="w-full bg-cine-gold hover:bg-white text-black font-black text-lg md:text-xl py-3 md:py-4 rounded-xl shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.02] transition-all flex items-center justify-center gap-2 md:gap-3 uppercase tracking-wide"
                           >
-                              <Play size={20} fill="black" />
-                              Comenzar Función
+                              {user.isAdmin && (selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5) ? (
+                                  <><Shield size={20} fill="black" /> FORZAR INICIO (ADMIN)</>
+                              ) : (
+                                  <><Play size={20} fill="black" /> Comenzar Función</>
+                              )}
                           </button>
                           
                           {currentLevel >= selectedChallenge.level && (
                               <p className="text-center text-[10px] md:text-xs text-gray-500 font-bold">
                                   * Ya has completado este nivel. Jugarás en modo repetición.
+                              </p>
+                          )}
+                          
+                          {selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5 && !user.isAdmin && (
+                              <p className="text-center text-[10px] md:text-xs text-red-500 font-bold flex items-center justify-center gap-1">
+                                  <AlertTriangle size={12}/> Requisito: Ver 5 películas (Llevas {user.watchedMovies.length})
                               </p>
                           )}
                       </div>
@@ -161,7 +192,7 @@ const Arcade: React.FC = () => {
                   <div 
                     key={challenge.level}
                     className={`relative group rounded-xl overflow-hidden shadow-2xl transition-all duration-500 ${isLocked ? 'grayscale opacity-60' : 'hover:scale-105 cursor-pointer border-2 border-transparent hover:border-cine-gold'}`}
-                    onClick={() => !isLocked && setSelectedChallenge(challenge)}
+                    onClick={() => (!isLocked || user.isAdmin) && setSelectedChallenge(challenge)}
                   >
                       {/* POSTER IMAGE */}
                       <div className="aspect-[2/3] w-full bg-gray-900 relative overflow-hidden">
@@ -192,6 +223,15 @@ const Arcade: React.FC = () => {
                               )}
                           </div>
 
+                          {/* ADMIN TEST BUTTON OVERLAY */}
+                          {user.isAdmin && (
+                              <div className="absolute top-2 right-2 z-50">
+                                  <div className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg border border-blue-400 flex items-center gap-1 hover:bg-blue-500 transition-colors">
+                                      <Shield size={10} fill="currentColor"/> TEST
+                                  </div>
+                              </div>
+                          )}
+
                           {/* Level Badge */}
                           <div className="absolute top-2 left-2 z-20">
                               <div className="bg-black/60 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded border border-gray-700">
@@ -214,7 +254,7 @@ const Arcade: React.FC = () => {
                                   {challenge.title}
                               </h3>
                               <div className="flex items-center justify-between text-xs text-gray-300">
-                                  <span className="uppercase tracking-widest">{challenge.type === 'boss' ? 'Jefe Final' : 'Trivial'}</span>
+                                  <span className="uppercase tracking-widest">{challenge.type === 'timeline' ? 'Juego de Mesa' : challenge.type === 'boss' ? 'Jefe Final' : 'Trivial'}</span>
                                   {isCompleted && <span className="text-green-400 font-bold">Completado</span>}
                               </div>
                               
