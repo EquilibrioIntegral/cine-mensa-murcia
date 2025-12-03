@@ -1,5 +1,3 @@
-
-
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
 import { auth, db } from '../firebase';
@@ -218,7 +216,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // SAFE REDIRECT EFFECT
   useEffect(() => {
       if (user && currentView === ViewState.LOGIN) {
-          setCurrentView(ViewState.NEWS);
+          // Only redirect if active or admin. Pending users stay on login (if signed out) or hit App.tsx block.
+          if (user.status === 'active' || user.isAdmin) {
+              setCurrentView(ViewState.NEWS);
+          }
       }
   }, [user, currentView]);
 
@@ -718,14 +719,35 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setTmdbToken = async (token: string) => { await setDoc(doc(db, 'config', 'tmdb'), { token }); setTmdbTokenState(token); };
   const login = async (email: string, name: string) => { try { await signInWithEmailAndPassword(auth, email, name); return { success: true, message: 'Bienvenido' }; } catch (e: any) { return { success: false, message: e.message }; } };
   const logout = async () => { await signOut(auth); };
+  
   const register = async (email: string, name: string, password: string) => {
       try {
           const cred = await createUserWithEmailAndPassword(auth, email, password);
-          const newUser: User = { id: cred.user.uid, email: email, name: name, avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`, watchedMovies: [], watchlist: [], status: 'pending', isAdmin: false, xp: 0, level: 1, credits: 0, completedMissions: [], inventory: [], lastLevelUpTimestamp: Date.now() }; // Initialize timestamp
+          const newUser: User = { 
+              id: cred.user.uid, 
+              email: email, 
+              name: name, 
+              avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`, 
+              watchedMovies: [], 
+              watchlist: [], 
+              status: 'pending', 
+              isAdmin: false, 
+              xp: 0, 
+              level: 1, 
+              credits: 0, 
+              completedMissions: [], 
+              inventory: [], 
+              lastLevelUpTimestamp: Date.now() 
+          };
           await setDoc(doc(db, 'users', cred.user.uid), newUser);
-          return { success: true, message: 'Registro exitoso. Espera aprobación.' };
+          
+          // CRITICAL: Force sign out immediately after registration to prevent auto-login
+          await signOut(auth);
+          
+          return { success: true, message: 'Registro exitoso. Tu cuenta está pendiente de aprobación por un administrador. Podrás acceder cuando sea validada.' };
       } catch (e: any) { return { success: false, message: e.message }; }
   };
+
   const resetPassword = async (email: string) => { try { await sendPasswordResetEmail(auth, email); return { success: true, message: 'Correo enviado.' }; } catch (e: any) { return { success: false, message: e.message }; } };
   const updateUserProfile = async (name: string, avatarUrl: string) => { if (!user) return; await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); const updatedUser = { ...user, name, avatarUrl }; checkAchievements(updatedUser); };
   const approveUser = async (userId: string) => { await updateDoc(doc(db, 'users', userId), { status: 'active' }); };
