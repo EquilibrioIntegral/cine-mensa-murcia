@@ -1,8 +1,12 @@
 
+
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState, NewsItem } from '../types';
-import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle, Eye, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Newspaper, Bell, CheckCircle, Ticket, ChevronRight, Bug, Calendar, AlertCircle, Eye, MessageCircle, ChevronDown, ChevronUp, Medal, ArrowRight } from 'lucide-react';
+import RankBadge from '../components/RankBadge';
+import { RANKS } from '../constants';
+import OnlineUsersWidget from '../components/OnlineUsersWidget';
 
 const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -50,18 +54,79 @@ const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
 };
 
 const News: React.FC = () => {
-  const { news, activeEvent, setView, user } = useData();
+  const { news, activeEvent, setView, user, setInitialProfileTab } = useData();
   
   // Separate news by type
   const generalNews = news.filter(n => n.type !== 'update' && n.type !== 'event');
   const updates = news.filter(n => n.type === 'update');
 
+  const goToCareer = () => {
+      setInitialProfileTab('career');
+      setView(ViewState.PROFILE);
+  };
+
+  const currentRank = user ? RANKS.slice().reverse().find(r => (user.level || 1) >= r.minLevel) : RANKS[0];
+  const rankImage = currentRank ? `https://image.pollinations.ai/prompt/cinematic%20shot%20of%20a%20${currentRank.title}%20in%20a%20movie%20set%20atmosphere?width=800&height=300&nologo=true&model=flux` : '';
+
+  const hasOnlineTracker = user?.inventory?.includes('item_online_tracker');
+
   return (
     <div className="container mx-auto px-4 py-8 pb-20 max-w-5xl">
+      
+      {/* ONLINE USERS WIDGET (PREMIUM FEATURE) */}
+      {hasOnlineTracker && <OnlineUsersWidget />}
+
       <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-white mb-2">CINE MENSA <span className="text-cine-gold">MURCIA</span></h1>
           <p className="text-gray-400">El punto de encuentro de los cinéfilos exigentes.</p>
       </div>
+
+      {/* IDENTITY CARD (Moved here from Dashboard) */}
+      {user && (
+          <div className="mb-12 relative overflow-hidden rounded-2xl border border-cine-gold/30 shadow-2xl group cursor-pointer" onClick={goToCareer}>
+               {/* AI Generated Background based on Rank */}
+               <div className="absolute inset-0">
+                   <img src={rankImage} alt="Rank Background" className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform duration-700 filter grayscale group-hover:grayscale-0" />
+                   <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-transparent"></div>
+               </div>
+
+               <div className="relative z-10 p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-6">
+                      <div className="relative">
+                          <div className="w-24 h-24 rounded-full border-4 border-cine-gold overflow-hidden shadow-[0_0_20px_rgba(212,175,55,0.3)]">
+                              <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="absolute -bottom-2 -right-2 bg-black text-white text-xs font-black px-2 py-1 rounded border border-gray-700">
+                              LVL {user.level || 1}
+                          </div>
+                      </div>
+                      <div>
+                          <h2 className="text-3xl font-bold text-white mb-1">
+                              {user.name}
+                          </h2>
+                          <div className="flex items-center gap-2 mb-2">
+                              <RankBadge level={user.level || 1} size="md" />
+                              <div className="bg-black/60 px-2 py-0.5 rounded text-xs text-cine-gold font-mono border border-cine-gold/30 flex items-center gap-1">
+                                  <Ticket size={10}/> {user.credits || 0} pts
+                              </div>
+                          </div>
+                          <p className="text-gray-300 text-sm max-w-md italic">
+                              "Tu historia en el cine está siendo escrita. ¡Completa misiones para ascender!"
+                          </p>
+                      </div>
+                  </div>
+
+                  <div className="flex-shrink-0">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); goToCareer(); }}
+                        className="bg-cine-gold text-black font-black py-3 px-8 rounded-full hover:bg-white transition-colors flex items-center gap-2 shadow-lg hover:shadow-cine-gold/50"
+                      >
+                          <Medal size={20}/> VER MI CARRERA <ArrowRight size={20}/>
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           

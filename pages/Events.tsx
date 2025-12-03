@@ -48,7 +48,7 @@ const TIME_CATEGORIES = [
 ];
 
 const Events: React.FC = () => {
-  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, raiseHand, grantTurn, releaseTurn } = useData();
+  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, raiseHand, grantTurn, releaseTurn, triggerAction } = useData();
   const [generating, setGenerating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [startingDiscussion, setStartingDiscussion] = useState(false);
@@ -56,6 +56,11 @@ const Events: React.FC = () => {
   const [modThinking, setModThinking] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Trigger Gamification
+  useEffect(() => {
+      triggerAction('visit_events');
+  }, []);
 
   // Voice Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -669,22 +674,12 @@ const Events: React.FC = () => {
                         {eventMessages.map(msg => {
                             const isMe = msg.userId === user?.id;
                             const isMod = msg.role === 'moderator';
-                            const msgUser = allUsers.find(u => u.id === msg.userId);
-                            
                             return (
                                 <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                                     <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                        <div className="flex-shrink-0 flex flex-col items-center">
-                                            <img src={msg.userAvatar} className={`w-8 h-8 rounded-full border ${isMod ? 'border-cine-gold' : 'border-gray-700'}`} alt="Avatar" />
-                                            {isMod && <span className="text-[10px] text-cine-gold font-bold mt-1">HOST</span>}
-                                        </div>
+                                        <div className="flex-shrink-0 flex flex-col items-center"><img src={msg.userAvatar} className={`w-8 h-8 rounded-full border ${isMod ? 'border-cine-gold' : 'border-gray-700'}`} alt="Avatar" />{isMod && <span className="text-[10px] text-cine-gold font-bold mt-1">HOST</span>}</div>
                                         <div className={`p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : isMod ? 'bg-black/80 text-cine-gold border border-cine-gold rounded-tl-none shadow-[0_0_15px_rgba(212,175,55,0.15)]' : 'bg-gray-700 text-white border border-gray-600 rounded-tl-none'}`}>
-                                            {!isMe && !isMod && (
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <p className="text-xs text-gray-400 font-bold">{msg.userName}</p>
-                                                    {msgUser && <RankBadge level={msgUser.level || 1} size="sm" showTitle={false} />}
-                                                </div>
-                                            )}
+                                            {!isMe && !isMod && <p className="text-xs text-gray-400 font-bold mb-1">{msg.userName}</p>}
                                             {msg.audioBase64 && (
                                                 <div className="flex items-center gap-2 mb-2 text-xs bg-black/20 p-1 rounded px-2 w-fit">
                                                     <Mic size={12} className="text-green-400"/> 

@@ -1,12 +1,12 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news } = useData();
+  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news, resetGamification } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -151,6 +151,13 @@ const AdminPanel: React.FC = () => {
       }
       setGeneratedNews([]); // Clear selection
   };
+  
+  const handleResetGamification = async () => {
+      const confirm = window.confirm("¡PELIGRO! Esto borrará el XP, Nivel, Misiones y Créditos de TODOS los usuarios. ¿Estás seguro?");
+      if (confirm) {
+          await resetGamification();
+      }
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 pb-20">
@@ -360,13 +367,32 @@ const AdminPanel: React.FC = () => {
 
       {/* CONFIG TAB */}
       {activeTab === 'config' && (
-          <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
-              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Key size={20} className="text-cine-gold" /> Configuración TMDB</h3>
-              <div className="flex gap-4">
-                <input type="text" value={newToken} onChange={(e) => setNewToken(e.target.value)} className="flex-grow bg-black/50 border border-gray-600 rounded p-3 text-white" />
-                <button onClick={handleSaveToken} className="bg-cine-gold text-black font-bold px-6 rounded">Guardar</button>
+          <div className="space-y-6">
+              <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
+                  <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Key size={20} className="text-cine-gold" /> Configuración TMDB</h3>
+                  <div className="flex gap-4">
+                    <input type="text" value={newToken} onChange={(e) => setNewToken(e.target.value)} className="flex-grow bg-black/50 border border-gray-600 rounded p-3 text-white" />
+                    <button onClick={handleSaveToken} className="bg-cine-gold text-black font-bold px-6 rounded">Guardar</button>
+                  </div>
+                  {saveMessage && <p className={`mt-2 ${saveMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{saveMessage.text}</p>}
               </div>
-              {saveMessage && <p className={`mt-2 ${saveMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{saveMessage.text}</p>}
+
+              {/* DANGER ZONE */}
+              <div className="bg-red-900/10 p-6 rounded-xl border border-red-900/50">
+                  <h3 className="text-xl font-bold text-red-500 mb-4 flex items-center gap-2"><AlertTriangle size={20}/> Zona de Peligro</h3>
+                  <p className="text-gray-400 mb-4 text-sm">
+                      Acciones irreversibles. Úsalas con extrema precaución.
+                  </p>
+                  <button 
+                    onClick={handleResetGamification}
+                    className="bg-red-900 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-800 transition-colors w-full md:w-auto"
+                  >
+                      ⚠️ RESET TOTAL DE GAMIFICACIÓN
+                  </button>
+                  <p className="text-xs text-red-400 mt-2">
+                      * Pondrá a TODOS los usuarios en Nivel 1, XP 0 y borrará sus misiones. No afecta a las reseñas.
+                  </p>
+              </div>
           </div>
       )}
     </div>

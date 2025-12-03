@@ -13,19 +13,37 @@ import Events from './pages/Events';
 import News from './pages/News';
 import Feedback from './pages/Feedback';
 import Profile from './pages/Profile';
+import Shop from './pages/Shop';
+import Arcade from './pages/Arcade';
+import CareerMilestoneModal from './components/CareerMilestoneModal';
 import { ViewState } from './types';
 
 const AppContent: React.FC = () => {
-  const { currentView, user } = useData();
+  const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab } = useData();
 
   if (!user) {
     return <Login />;
   }
 
+  const handleMilestoneAction = () => {
+      closeMilestoneModal();
+      setInitialProfileTab('career');
+      setView(ViewState.PROFILE);
+  };
+
   return (
     <div className="min-h-screen bg-cine-dark text-gray-100 flex flex-col font-sans">
       <Navbar />
       
+      {milestoneEvent && (
+          <CareerMilestoneModal 
+              event={milestoneEvent}
+              userName={user.name}
+              onClose={closeMilestoneModal}
+              onAction={handleMilestoneAction}
+          />
+      )}
+
       <main className="flex-grow">
         {currentView === ViewState.NEWS && <News />}
         {currentView === ViewState.DASHBOARD && <Dashboard />}
@@ -37,6 +55,8 @@ const AppContent: React.FC = () => {
         {currentView === ViewState.EVENTS && <Events />}
         {currentView === ViewState.FEEDBACK && <Feedback />}
         {currentView === ViewState.PROFILE && <Profile />}
+        {currentView === ViewState.SHOP && <Shop />}
+        {currentView === ViewState.ARCADE && <Arcade />}
       </main>
 
       <footer className="bg-black py-6 mt-auto border-t border-gray-900">

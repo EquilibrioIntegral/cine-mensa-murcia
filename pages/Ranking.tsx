@@ -1,12 +1,17 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { Trophy, Users, Star, ThumbsUp, Medal } from 'lucide-react';
 import { ViewState } from '../types';
 
 const Ranking: React.FC = () => {
-  const { movies, allUsers, userRatings, setView } = useData();
+  const { movies, allUsers, userRatings, setView, triggerAction } = useData();
   const [activeTab, setActiveTab] = useState<'movies' | 'critics'>('movies');
+
+  // Trigger gamification
+  useEffect(() => {
+      triggerAction('visit_ranking');
+  }, []);
 
   // Logic for Movie Ranking
   const sortedMovies = useMemo(() => {

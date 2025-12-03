@@ -2,7 +2,7 @@
 import React, { useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell } from 'lucide-react';
+import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell, ShoppingBag, Gamepad2 } from 'lucide-react';
 import RankBadge from './RankBadge';
 
 const Navbar: React.FC = () => {
@@ -11,7 +11,7 @@ const Navbar: React.FC = () => {
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
       onClick={() => setView(view)}
-      className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all text-sm md:text-base ${
+      className={`flex items-center gap-2 px-3 py-2 rounded-full transition-all text-sm md:text-base whitespace-nowrap ${
         currentView === view 
           ? 'bg-cine-gold text-cine-dark font-bold' 
           : 'text-gray-400 hover:text-white hover:bg-white/10'
@@ -43,12 +43,14 @@ const Navbar: React.FC = () => {
             <h1 className="text-xl font-bold tracking-wider text-white md:hidden">CM<span className="text-cine-gold">M</span></h1>
             </div>
 
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar mx-4">
                 <NavItem view={ViewState.NEWS} icon={Home} label="Noticias" />
                 <NavItem view={ViewState.DASHBOARD} icon={Film} label="Catálogo" />
-                <NavItem view={ViewState.EVENTS} icon={Ticket} label="Eventos" />
                 <NavItem view={ViewState.RANKING} icon={Trophy} label="Ranking" />
-                <NavItem view={ViewState.WATCHLIST} icon={ListVideo} label="Lista" />
+                <NavItem view={ViewState.WATCHLIST} icon={ListVideo} label="Mi Lista" />
+                <NavItem view={ViewState.EVENTS} icon={Ticket} label="Eventos" />
+                <NavItem view={ViewState.ARCADE} icon={Gamepad2} label="Retos" />
+                <NavItem view={ViewState.SHOP} icon={ShoppingBag} label="Taquilla" />
                 <NavItem view={ViewState.RECOMMENDATIONS} icon={Sparkles} label="IA" />
                 {user?.isAdmin && (
                 <button
@@ -66,20 +68,21 @@ const Navbar: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-4">
+                
+                {/* User Credits Display */}
+                {user && (
+                    <div className="hidden md:flex items-center gap-1 bg-black/40 px-3 py-1 rounded-full border border-cine-gold/30">
+                        <Ticket size={14} className="text-cine-gold" />
+                        <span className="text-white font-bold text-sm">{user.credits || 0}</span>
+                    </div>
+                )}
+
                 <button 
                     onClick={() => setView(ViewState.FEEDBACK)}
-                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
+                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors hidden sm:block"
                     title="Reportar Bug o Mejora"
                 >
                     <Bug size={20} />
-                </button>
-
-                <button 
-                    onClick={() => setView(ViewState.DASHBOARD)}
-                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors"
-                    title="Buscar película"
-                >
-                    <Search size={22} />
                 </button>
 
                 <div className="hidden md:flex items-center gap-3 cursor-pointer group" onClick={() => setView(ViewState.PROFILE)}>
@@ -103,12 +106,12 @@ const Navbar: React.FC = () => {
         {/* NOTIFICATION TOAST */}
         {notification && (
             <div className="fixed top-20 right-4 z-[100] animate-slide-in-right">
-                <div className={`p-4 rounded-xl border shadow-2xl flex items-center gap-3 ${notification.type === 'level' ? 'bg-gradient-to-r from-cine-gold to-yellow-600 text-black border-yellow-400' : 'bg-gray-800 text-white border-cine-gold'}`}>
+                <div className={`p-4 rounded-xl border shadow-2xl flex items-center gap-3 ${notification.type === 'level' ? 'bg-gradient-to-r from-cine-gold to-yellow-600 text-black border-yellow-400' : notification.type === 'shop' ? 'bg-black text-cine-gold border-cine-gold' : 'bg-gray-800 text-white border-cine-gold'}`}>
                     <div className={`p-2 rounded-full ${notification.type === 'level' ? 'bg-black text-cine-gold' : 'bg-cine-gold text-black'}`}>
-                        {notification.type === 'level' ? <Trophy size={20}/> : <Bell size={20}/>}
+                        {notification.type === 'level' ? <Trophy size={20}/> : notification.type === 'shop' ? <ShoppingBag size={20}/> : <Bell size={20}/>}
                     </div>
                     <div>
-                        <h4 className="font-bold uppercase text-xs tracking-wider">{notification.type === 'level' ? '¡NIVEL SUBIDO!' : '¡MISIÓN COMPLETADA!'}</h4>
+                        <h4 className="font-bold uppercase text-xs tracking-wider">{notification.type === 'level' ? '¡NIVEL SUBIDO!' : notification.type === 'shop' ? '¡TAQUILLA!' : '¡MISIÓN COMPLETADA!'}</h4>
                         <p className="text-sm font-bold">{notification.message}</p>
                     </div>
                 </div>

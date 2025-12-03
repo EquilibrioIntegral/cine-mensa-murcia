@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { useData } from '../context/DataContext';
@@ -5,7 +6,7 @@ import { searchMoviesTMDB, TMDBMovieResult, getImageUrl } from '../services/tmdb
 import { ViewState } from '../types';
 
 const MovieSearch: React.FC = () => {
-  const { tmdbToken, setView } = useData();
+  const { tmdbToken, setView, triggerAction } = useData();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TMDBMovieResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -24,6 +25,11 @@ const MovieSearch: React.FC = () => {
         try {
             const data = await searchMoviesTMDB(query, tmdbToken);
             setResults(data.slice(0, 6)); // Limit to 6 results
+            
+            // Trigger Gamification Action
+            if (data.length > 0) {
+                triggerAction('search');
+            }
         } catch (err: any) {
             // Sanitized logging to prevent circular JSON error
             console.error("Error en búsqueda:", String(err));

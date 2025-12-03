@@ -1,18 +1,33 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import AvatarSelector from '../components/AvatarSelector';
-import { User, Film, Star, MessageSquare, ThumbsUp, Medal, Trophy, CheckCircle, Lock } from 'lucide-react';
+import { User, Film, Star, MessageSquare, ThumbsUp, Medal, Trophy, CheckCircle, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import RankBadge from '../components/RankBadge';
-import { MISSIONS, XP_PER_LEVEL } from '../constants';
+import { MISSIONS, RANKS, XP_TABLE } from '../constants';
 
 const Profile: React.FC = () => {
-  const { user, userRatings, updateUserProfile } = useData();
+  const { user, userRatings, updateUserProfile, initialProfileTab, setInitialProfileTab } = useData();
   const [activeTab, setActiveTab] = useState<'profile' | 'career'>('profile');
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [avatar, setAvatar] = useState(user?.avatarUrl || '');
   const [saving, setSaving] = useState(false);
+  
+  // State for Career Accordions (defaults to current rank open)
+  const [expandedRank, setExpandedRank] = useState<string | null>(null);
+
+  // Sync tab with context (if user came from the modal)
+  useEffect(() => {
+      setActiveTab(initialProfileTab);
+      // Auto-expand current rank
+      if (user) {
+          const currentRank = RANKS.slice().reverse().find(r => (user.level || 1) >= r.minLevel);
+          if (currentRank) setExpandedRank(currentRank.id);
+      }
+      // Reset context so normal navigation works
+      return () => setInitialProfileTab('profile');
+  }, []); // Only on mount
 
   if (!user) return null;
 
@@ -23,9 +38,23 @@ const Profile: React.FC = () => {
     ? (myReviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1) 
     : '0';
 
-  // Gamification Stats
-  const levelProgress = (user.xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100;
-  const xpForNextLevel = XP_PER_LEVEL - (user.xp % XP_PER_LEVEL);
+  // --- XP PROGRESS CALCULATION ---
+  const currentLevel = user.level || 1;
+  const xp = user.xp || 0;
+  
+  let prevThreshold = 0;
+  let nextThreshold = XP_TABLE[0]; // Default for Lvl 1
+
+  if (currentLevel > 1) {
+      prevThreshold = XP_TABLE[currentLevel - 2];
+      nextThreshold = XP_TABLE[currentLevel - 1] || (prevThreshold * 1.5); // Fallback
+  }
+
+  const xpProgressInLevel = Math.max(0, xp - prevThreshold);
+  const xpNeededForLevel = nextThreshold - prevThreshold;
+  const levelProgress = Math.min(100, (xpProgressInLevel / xpNeededForLevel) * 100);
+  const xpRemaining = nextThreshold - xp;
+
 
   const handleSave = async () => {
       setSaving(true);
@@ -162,9 +191,9 @@ const Profile: React.FC = () => {
         )}
 
         {activeTab === 'career' && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-in space-y-8">
                 {/* Level Progress */}
-                <div className="bg-gradient-to-r from-gray-900 to-black p-8 rounded-xl border border-gray-700 shadow-2xl mb-8 relative overflow-hidden">
+                <div className="bg-gradient-to-r from-gray-900 to-black p-8 rounded-xl border border-gray-700 shadow-2xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-8 opacity-10">
                         <Trophy size={128} className="text-cine-gold" />
                     </div>
@@ -176,7 +205,7 @@ const Profile: React.FC = () => {
                             </div>
                             <div className="text-right">
                                 <p className="text-3xl font-black text-white">{user.xp || 0} <span className="text-sm text-cine-gold font-bold">XP</span></p>
-                                <p className="text-xs text-gray-500">Faltan {xpForNextLevel} XP para subir</p>
+                                <p className="text-xs text-gray-500">Faltan {xpRemaining} XP para subir</p>
                             </div>
                         </div>
                         <div className="w-full h-4 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
@@ -188,39 +217,102 @@ const Profile: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Missions Grid */}
-                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                    <Trophy className="text-cine-gold" size={20}/> Misiones y Logros
+                {/* ROADMAP SECTION */}
+                <h3 className="text-2xl font-bold text-white flex items-center gap-2 mb-6 border-b border-gray-800 pb-2">
+                    <Film className="text-cine-gold" size={24}/> Tu Camino al Estrellato
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {MISSIONS.map(mission => {
-                        const isCompleted = user.completedMissions?.includes(mission.id);
-                        const Icon = mission.icon;
+                
+                <div className="space-y-4">
+                    {RANKS.map((rank, idx) => {
+                        const isUnlocked = currentLevel >= rank.minLevel;
+                        const isNext = !isUnlocked && (idx === 0 || currentLevel >= RANKS[idx - 1].minLevel);
+                        const isExpanded = expandedRank === rank.id;
                         
+                        // Find missions for this rank
+                        const rankMissions = MISSIONS.filter(m => m.rankId === rank.id);
+                        const completedCount = rankMissions.filter(m => user.completedMissions?.includes(m.id)).length;
+                        const totalCount = rankMissions.length;
+                        
+                        // Determine Rank Status
+                        let statusColor = "text-gray-500";
+                        let borderColor = "border-gray-800";
+                        let bgColor = "bg-black/40";
+                        
+                        if (isUnlocked) {
+                             statusColor = rank.color;
+                             borderColor = "border-cine-gold/50";
+                             bgColor = "bg-cine-gold/5";
+                        } else if (isNext) {
+                             borderColor = "border-gray-600";
+                        }
+
                         return (
-                            <div 
-                                key={mission.id} 
-                                className={`p-4 rounded-xl border flex items-center gap-4 transition-all ${
-                                    isCompleted 
-                                        ? 'bg-gradient-to-br from-gray-900 to-cine-gold/10 border-cine-gold/50 shadow-lg' 
-                                        : 'bg-black/40 border-gray-800 opacity-60 hover:opacity-80'
-                                }`}
-                            >
-                                <div className={`p-3 rounded-full ${isCompleted ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-500'}`}>
-                                    {isCompleted ? <Icon size={24} /> : <Lock size={24} />}
-                                </div>
-                                <div className="flex-grow">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <h4 className={`font-bold ${isCompleted ? 'text-white' : 'text-gray-400'}`}>{mission.title}</h4>
-                                        {isCompleted && <CheckCircle size={16} className="text-green-500" />}
+                            <div key={rank.id} className={`rounded-xl border transition-all overflow-hidden ${borderColor} ${bgColor} ${!isUnlocked && !isNext ? 'opacity-50 grayscale' : ''}`}>
+                                <div 
+                                    onClick={() => (isUnlocked || isNext) && setExpandedRank(isExpanded ? null : rank.id)}
+                                    className={`p-4 flex items-center justify-between cursor-pointer ${isUnlocked ? 'hover:bg-cine-gold/10' : ''}`}
+                                >
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-3 rounded-full ${isUnlocked ? 'bg-black border border-cine-gold' : 'bg-gray-800'}`}>
+                                            {isUnlocked ? <rank.icon size={24} className={rank.color} /> : <Lock size={24} className="text-gray-500"/>}
+                                        </div>
+                                        <div>
+                                            <h4 className={`text-lg font-bold ${isUnlocked ? 'text-white' : 'text-gray-400'}`}>{rank.title}</h4>
+                                            <p className="text-xs text-gray-500 font-mono">Nivel {rank.minLevel}+</p>
+                                        </div>
                                     </div>
-                                    <p className="text-sm text-gray-500 leading-snug mb-2">{mission.description}</p>
-                                    <div className="flex items-center gap-1">
-                                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${isCompleted ? 'bg-cine-gold/20 text-cine-gold' : 'bg-gray-800 text-gray-500'}`}>
-                                            +{mission.xpReward} XP
-                                        </span>
+
+                                    <div className="flex items-center gap-4">
+                                        {rankMissions.length > 0 && (
+                                            <div className="text-right hidden sm:block">
+                                                <p className="text-xs text-gray-500 uppercase font-bold">Misiones</p>
+                                                <p className={`font-bold ${completedCount === totalCount ? 'text-green-500' : 'text-white'}`}>
+                                                    {completedCount} / {totalCount}
+                                                </p>
+                                            </div>
+                                        )}
+                                        {isExpanded ? <ChevronUp size={20} className="text-gray-500"/> : <ChevronDown size={20} className="text-gray-500"/>}
                                     </div>
                                 </div>
+
+                                {isExpanded && (
+                                    <div className="border-t border-gray-800 p-4 bg-black/20">
+                                        {rankMissions.length === 0 ? (
+                                            <p className="text-gray-500 italic text-sm text-center">No hay misiones específicas para este rango aún.</p>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                {rankMissions.map(mission => {
+                                                    const isCompleted = user.completedMissions?.includes(mission.id);
+                                                    const Icon = mission.icon;
+                                                    
+                                                    return (
+                                                        <div 
+                                                            key={mission.id} 
+                                                            className={`p-3 rounded-lg border flex items-center gap-3 transition-all ${
+                                                                isCompleted 
+                                                                    ? 'bg-green-900/10 border-green-900/50' 
+                                                                    : 'bg-black/40 border-gray-800'
+                                                            }`}
+                                                        >
+                                                            <div className={`p-2 rounded-full ${isCompleted ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'}`}>
+                                                                {isCompleted ? <CheckCircle size={18} /> : <Icon size={18} />}
+                                                            </div>
+                                                            <div className="flex-grow">
+                                                                <h5 className={`text-sm font-bold ${isCompleted ? 'text-white' : 'text-gray-300'}`}>{mission.title}</h5>
+                                                                <p className="text-xs text-gray-500">{mission.description}</p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${isCompleted ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-500'}`}>
+                                                                    +{mission.xpReward} XP
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

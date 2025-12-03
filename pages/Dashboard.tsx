@@ -1,13 +1,16 @@
+
 import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import MovieCard from '../components/MovieCard';
 import MovieSearch from '../components/MovieSearch';
-import { Filter, SortAsc, SortDesc, Calendar, Star, Type } from 'lucide-react';
+import { Filter, SortAsc, SortDesc, Calendar, Star, Type, Ticket, Medal, ArrowRight } from 'lucide-react';
+import RankBadge from '../components/RankBadge';
+import { ViewState } from '../types';
 
 type SortOption = 'recent' | 'oldest' | 'rating' | 'alpha';
 
 const Dashboard: React.FC = () => {
-  const { movies } = useData();
+  const { movies, user, setView, setInitialProfileTab } = useData();
   const [filterGenre, setFilterGenre] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
 
@@ -47,6 +50,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-8 pb-20">
+      
       {/* Header & Search */}
       <div className="flex flex-col items-center mb-10 gap-6">
         <div className="text-center">

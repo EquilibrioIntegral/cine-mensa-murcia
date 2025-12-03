@@ -1,13 +1,15 @@
 
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission } from '../types';
+import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  updateProfile
 } from "firebase/auth";
 import { 
   collection, 
@@ -24,12 +26,15 @@ import {
   addDoc,
   limit,
   where,
-  getCountFromServer
+  getCountFromServer,
+  writeBatch,
+  getDocs,
+  deleteField
 } from "firebase/firestore";
 import { decideBestTime, generateCinemaNews } from '../services/geminiService';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
 import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB, searchMoviesTMDB } from '../services/tmdbService';
-import { MISSIONS, XP_PER_LEVEL } from '../constants';
+import { MISSIONS, XP_TABLE, RANKS } from '../constants';
 
 // --- AUDIO UTILS ---
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -84,7 +89,7 @@ interface DataContextType {
   stopLiveSession: () => void;
 
   setTmdbToken: (token: string) => Promise<void>;
-  login: (email: string, name: string) => Promise<{ success: boolean; message: string }>;
+  login: (email: string, name: string) => Promise<{ success: boolean; message: string }>; // name unused in login but kept for sig match
   logout: () => void;
   register: (email: string, name: string, password: string, avatarUrl?: string) => Promise<{ success: boolean; message: string }>;
   resetPassword: (email: string) => Promise<{ success: boolean; message: string }>;
@@ -120,8 +125,27 @@ interface DataContextType {
   getEpisodeCount: () => Promise<number>;
   
   // Notification State (For Gamification)
-  notification: { message: string, type: 'level' | 'mission' } | null;
+  notification: { message: string, type: 'level' | 'mission' | 'shop' } | null;
   clearNotification: () => void;
+
+  // Economy
+  earnCredits: (amount: number, reason: string) => Promise<void>;
+  spendCredits: (amount: number, itemId: string) => Promise<boolean>;
+
+  // Career Milestone Modal State
+  milestoneEvent: MilestoneEvent | null;
+  closeMilestoneModal: () => void;
+  initialProfileTab: 'profile' | 'career'; // To control Profile tab on navigation
+  setInitialProfileTab: (tab: 'profile' | 'career') => void;
+
+  // Admin Tools
+  resetGamification: () => Promise<void>;
+  
+  // Trigger Action (for new missions)
+  triggerAction: (action: string) => Promise<void>;
+
+  // Manual Level Up Logic
+  completeLevelUpChallenge: (nextLevel: number, rewardCredits: number) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -140,8 +164,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [news, setNews] = useState<NewsItem[]>([]);
   const [feedbackList, setFeedbackList] = useState<AppFeedback[]>([]);
   
-  const [notification, setNotification] = useState<{ message: string, type: 'level' | 'mission' } | null>(null);
-  
+  const [notification, setNotification] = useState<{ message: string, type: 'level' | 'mission' | 'shop' } | null>(null);
+  const [milestoneEvent, setMilestoneEvent] = useState<MilestoneEvent | null>(null);
+  const [initialProfileTab, setInitialProfileTab] = useState<'profile' | 'career'>('profile');
+
   // Top Critic Calculation
   const [topCriticId, setTopCriticId] = useState<string | null>(null);
 
@@ -167,13 +193,167 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Timer Ref for usage tracking
   const usageIntervalRef = useRef<number | null>(null);
 
-  // --- GAMIFICATION ENGINE ---
+  // AUTH LISTENER
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Fetch User Data
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const userData = docSnap.data() as User;
+                setUser(userData);
+                // Redirect if pending/rejected logic can be handled here or in UI
+                if (currentView === ViewState.LOGIN) setCurrentView(ViewState.NEWS);
+            } else {
+                // Should create? Handled in register.
+            }
+        });
+        return () => unsubscribeUser();
+      } else {
+        setUser(null);
+        setCurrentView(ViewState.LOGIN);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // DATA SUBSCRIPTIONS
+  useEffect(() => {
+      const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
+          setAllUsers(snap.docs.map(d => d.data() as User));
+      });
+      const unsubMovies = onSnapshot(collection(db, 'movies'), (snap) => {
+          setMovies(snap.docs.map(d => d.data() as Movie));
+      });
+      const unsubRatings = onSnapshot(collection(db, 'ratings'), (snap) => {
+          setUserRatings(snap.docs.map(d => d.data() as UserRating));
+      });
+      const unsubNews = onSnapshot(query(collection(db, 'news'), orderBy('timestamp', 'desc')), (snap) => {
+          setNews(snap.docs.map(d => d.data() as NewsItem));
+      });
+      const unsubFeedback = onSnapshot(collection(db, 'feedback'), (snap) => {
+          setFeedbackList(snap.docs.map(d => d.data() as AppFeedback));
+      });
+      
+      // Active Event
+      const qEvent = query(collection(db, 'events'), where('phase', '!=', 'closed'));
+      const unsubEvent = onSnapshot(qEvent, (snap) => {
+          if (!snap.empty) {
+              const event = snap.docs[0].data() as CineEvent;
+              setActiveEvent(event);
+          } else {
+              setActiveEvent(null);
+          }
+      });
+      
+      // TMDB Token (stored in a settings doc for admin)
+      const unsubConfig = onSnapshot(doc(db, 'config', 'tmdb'), (docSnap) => {
+         if (docSnap.exists()) {
+             setTmdbTokenState(docSnap.data().token);
+         }
+      });
+
+      return () => {
+          unsubUsers(); unsubMovies(); unsubRatings(); unsubNews(); unsubFeedback(); unsubEvent(); unsubConfig();
+      };
+  }, []);
+
+  // PRESENCE SYSTEM (HEARTBEAT)
+  useEffect(() => {
+      if (user && user.id) {
+          // Update immediately on mount/user change
+          updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
+
+          // Update every 60 seconds
+          const interval = setInterval(() => {
+              if (auth.currentUser) {
+                  updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
+              }
+          }, 60000);
+
+          return () => clearInterval(interval);
+      }
+  }, [user?.id]);
+
+  // Event Messages Subscription
+  useEffect(() => {
+      if (activeEvent) {
+          const qMessages = query(collection(db, `events/${activeEvent.id}/messages`), orderBy('timestamp', 'asc'));
+          const unsub = onSnapshot(qMessages, (snap) => {
+              setEventMessages(snap.docs.map(d => d.data() as EventMessage));
+          });
+          return () => unsub();
+      } else {
+          setEventMessages([]);
+      }
+  }, [activeEvent?.id]);
+
+  // --- WELCOME MODAL LOGIC (New User OR Reset User) ---
+  useEffect(() => {
+      // Check if user is loaded, is Active, and hasn't seen welcome (false or undefined)
+      if (user && user.status === 'active' && !user.hasSeenWelcome) {
+          // Trigger Welcome Modal
+          const rank1Title = RANKS.find(r => r.minLevel === 1)?.title || 'Espectador Novato';
+          setMilestoneEvent({
+              type: 'welcome',
+              rankTitle: rank1Title,
+              level: 1
+          });
+      }
+  }, [user?.status, user?.hasSeenWelcome]);
+
+
+  const closeMilestoneModal = async () => {
+      if (!user) return;
+      setMilestoneEvent(null);
+      
+      // Update DB based on event type if needed
+      if (!user.hasSeenWelcome) {
+          await updateDoc(doc(db, 'users', user.id), { hasSeenWelcome: true });
+      }
+  };
+
+  // --- ECONOMY ENGINE ---
+
+  const earnCredits = async (amount: number, reason: string) => {
+      if (!user) return;
+      try {
+          const newCredits = (user.credits || 0) + amount;
+          await updateDoc(doc(db, 'users', user.id), {
+              credits: newCredits
+          });
+          setNotification({ message: `+${amount} Créditos: ${reason}`, type: 'shop' });
+      } catch (e) { console.error("Error earning credits", e); }
+  };
+
+  const spendCredits = async (amount: number, itemId: string): Promise<boolean> => {
+      if (!user) return false;
+      if ((user.credits || 0) < amount) {
+          alert("No tienes suficientes créditos.");
+          return false;
+      }
+      try {
+          const newCredits = (user.credits || 0) - amount;
+          await updateDoc(doc(db, 'users', user.id), {
+              credits: newCredits,
+              inventory: arrayUnion(itemId)
+          });
+          setNotification({ message: `¡Artículo comprado!`, type: 'shop' });
+          return true;
+      } catch (e) {
+          console.error("Error spending credits", e);
+          return false;
+      }
+  };
+
+  // --- GAMIFICATION ENGINE (UPDATED: NO AUTO LEVEL UP) ---
   const checkAchievements = async (currentUser: User) => {
       if (!currentUser) return;
       
-      const myRatings = userRatings.filter(r => r.userId === currentUser.id);
+      const resetDate = currentUser.lastGamificationReset || 0;
+      const myRatings = userRatings.filter(r => r.userId === currentUser.id && r.timestamp > resetDate);
       
-      // Calculate Stats
       const stats = {
           ratingsCount: myRatings.length,
           reviewsCount: myRatings.filter(r => r.comment && r.comment.length > 5).length,
@@ -181,55 +361,215 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           horrorCount: myRatings.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => g.toLowerCase().includes('terror') || g.toLowerCase().includes('horror'));
+          }).length,
+          actionCount: myRatings.filter(r => {
+              const m = movies.find(mov => mov.id === r.movieId);
+              return m && m.genre.some(g => {
+                  const gl = g.toLowerCase();
+                  return gl.includes('acción') || gl.includes('action') || gl.includes('aventura') || gl.includes('adventure');
+              });
+          }).length,
+          comedyCount: myRatings.filter(r => {
+              const m = movies.find(mov => mov.id === r.movieId);
+              return m && m.genre.some(g => g.toLowerCase().includes('comedia') || g.toLowerCase().includes('comedy'));
+          }).length,
+          dramaCount: myRatings.filter(r => {
+              const m = movies.find(mov => mov.id === r.movieId);
+              return m && m.genre.some(g => g.toLowerCase().includes('drama'));
+          }).length,
+          scifiCount: myRatings.filter(r => {
+              const m = movies.find(mov => mov.id === r.movieId);
+              return m && m.genre.some(g => g.toLowerCase().includes('ciencia ficción') || g.toLowerCase().includes('science fiction') || g.toLowerCase().includes('sci-fi'));
           }).length
       };
 
-      let newXp = currentUser.xp || 0; 
-      let newCompletedMissions = [...(currentUser.completedMissions || [])]; // SAFE INIT
+      let newXp = 0; 
+      let newCompletedMissions = [...(currentUser.completedMissions || [])]; 
       let missionsCompletedNow: Mission[] = [];
 
       MISSIONS.forEach(mission => {
-          if (!newCompletedMissions.includes(mission.id)) {
-              if (mission.condition(currentUser, stats)) {
-                  newXp += mission.xpReward;
-                  newCompletedMissions.push(mission.id);
-                  missionsCompletedNow.push(mission);
+          if (newCompletedMissions.includes(mission.id)) {
+               newXp += mission.xpReward;
+          } else {
+              const rank = RANKS.find(r => r.id === mission.rankId);
+              const currentLevel = currentUser.level || 1;
+
+              if (rank && (currentLevel >= rank.minLevel || rank.minLevel === 1)) {
+                  if (mission.condition(currentUser, stats)) {
+                      newXp += mission.xpReward;
+                      newCompletedMissions.push(mission.id);
+                      missionsCompletedNow.push(mission);
+                  }
               }
           }
       });
 
-      // Calculate Level
-      // Level 1 = 0-99 XP, Level 2 = 100-199 XP...
-      const oldLevel = currentUser.level || 1;
-      const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
-
-      // Update Database only if changes
+      // --- CHANGE: DO NOT CALCULATE LEVEL UP HERE ---
+      // Level up is now manually triggered via Arcade Challenge.
+      // We only update XP and completed missions here.
+      
       if (newXp !== currentUser.xp || newCompletedMissions.length !== (currentUser.completedMissions || []).length) {
           try {
               await updateDoc(doc(db, 'users', currentUser.id), {
                   xp: newXp,
-                  level: newLevel,
                   completedMissions: newCompletedMissions
               });
               
-              // Notifications
-              if (newLevel > oldLevel) {
-                  setNotification({ message: `¡HAS SUBIDO AL NIVEL ${newLevel}!`, type: 'level' });
-              } else if (missionsCompletedNow.length > 0) {
-                  setNotification({ message: `¡Misión Completada: ${missionsCompletedNow[0].title}!`, type: 'mission' });
+              if (missionsCompletedNow.length > 0) {
+                  // User Request: Missions DO NOT give credits, only XP.
+                  // Only notify about completion and XP.
+                  setNotification({ message: `¡Misión Completada: ${missionsCompletedNow[0].title}! (+${missionsCompletedNow[0].xpReward} XP)`, type: 'mission' });
               }
           } catch(e) { console.error("Gamification update error", e); }
       }
   };
 
-  // Trigger gamification check when relevant data changes
+  // --- CHECK FOR LEVEL UP READINESS ---
   useEffect(() => {
-      if (user && userRatings.length > 0) {
-          // Debounce to avoid spamming
-          const t = setTimeout(() => checkAchievements(user), 2000);
-          return () => clearTimeout(t);
+      if (!user) return;
+      
+      const currentLevel = user.level || 1;
+      const nextLevelThreshold = XP_TABLE[currentLevel - 1]; // Array index is level - 1 for NEXT level cost (e.g. index 0 is 1->2 cost)
+      
+      // If we have enough XP for the NEXT level...
+      if (user.xp >= nextLevelThreshold && !milestoneEvent) {
+           // AND we are not already at max level (logic omitted for brevity, assume < 100)
+           // Trigger "Ready for Promotion" notification/modal
+           const nextRank = RANKS.find(r => r.minLevel === currentLevel + 1);
+           
+           // We only trigger this once per session or use a local flag to avoid spamming
+           // A better way is to check if we haven't seen this "ready" state yet.
+           // For now, we rely on the component mount cycle.
+           
+           // We use a small timeout to ensure data is settled
+           const t = setTimeout(() => {
+               // Logic to prevent re-opening if user just closed it could be added here
+               // For this implementation, we simply show it if condition meets
+               setMilestoneEvent({
+                   type: 'challenge_ready',
+                   rankTitle: nextRank ? nextRank.title : `Nivel ${currentLevel + 1}`,
+                   level: currentLevel + 1
+               });
+           }, 2000);
+           
+           return () => clearTimeout(t);
       }
-  }, [userRatings.length, user?.avatarUrl]); // Triggers on rating count change or avatar change
+  }, [user?.xp, user?.level]);
+
+
+  // --- MANUAL LEVEL UP EXECUTION ---
+  const completeLevelUpChallenge = async (nextLevel: number, rewardCredits: number) => {
+      if (!user) return;
+      
+      const oldLevel = user.level || 1;
+      
+      if (nextLevel > oldLevel) {
+          try {
+              await updateDoc(doc(db, 'users', user.id), {
+                  level: nextLevel,
+              });
+              
+              // Bonus for Level Up (Challenges DO give credits)
+              await earnCredits(rewardCredits, 'Reto de Ascenso Completado');
+              
+              const newRank = RANKS.find(r => r.minLevel === nextLevel) || RANKS.slice().reverse().find(r => nextLevel >= r.minLevel);
+              
+              // Show Victory Modal
+              setMilestoneEvent({
+                  type: 'levelup',
+                  rankTitle: newRank ? newRank.title : `Nivel ${nextLevel}`,
+                  level: nextLevel
+              });
+              
+          } catch(e) {
+              console.error("Error completing level up", e);
+          }
+      }
+  };
+
+
+  const triggerAction = async (action: string) => {
+      if (!user) return;
+      // If action is already recorded, do nothing to save writes
+      if (user.gamificationStats?.[action]) return;
+
+      const newStats = { ...(user.gamificationStats || {}), [action]: true };
+      
+      try {
+        await updateDoc(doc(db, 'users', user.id), {
+            [`gamificationStats.${action}`]: true
+        });
+        
+        // Optimistic update for checkAchievements to see it immediately
+        const updatedUser = { ...user, gamificationStats: newStats };
+        setUser(updatedUser);
+        checkAchievements(updatedUser);
+
+      } catch (e) {
+        console.error("Error triggering action", e);
+      }
+  };
+
+  // ADMIN: Reset All Gamification Data (Strict Version)
+  const resetGamification = async () => {
+      // Fetch fresh users to avoid stale state issues
+      const usersSnap = await getDocs(collection(db, 'users'));
+      if (usersSnap.empty) {
+          alert("No hay usuarios para resetear.");
+          return;
+      }
+
+      const allFreshUsers = usersSnap.docs.map(d => d.data() as User);
+
+      // Chunking for safety (Firestore limit is 500 operations per batch)
+      const chunkSize = 400; 
+      const chunks = [];
+      for (let i = 0; i < allFreshUsers.length; i += chunkSize) {
+          chunks.push(allFreshUsers.slice(i, i + chunkSize));
+      }
+
+      const resetTimestamp = Date.now();
+
+      try {
+          for (const chunk of chunks) {
+              const batch = writeBatch(db);
+              chunk.forEach(u => {
+                  const ref = doc(db, 'users', u.id);
+                  // Forcefully reset all fields. Use deleteField() for stats to ensure no ghosts remain.
+                  batch.update(ref, {
+                      xp: 0,
+                      level: 1,
+                      completedMissions: [],
+                      credits: 0,
+                      inventory: [],
+                      hasSeenWelcome: false, // EXPLICITLY FALSE so it retriggers
+                      gamificationStats: deleteField(), // Completely remove the map
+                      lastGamificationReset: resetTimestamp // This invalidates old ratings for XP calc
+                  });
+              });
+              await batch.commit();
+          }
+          
+          alert("¡RESET COMPLETADO CON ÉXITO!\n\nSe han restaurado los valores de fábrica de la gamificación.\n- Nivel 1\n- 0 Créditos\n- Misiones vacías\n- Intro reactivada\n\nLa página se recargará ahora.");
+          
+          // Small delay to ensure database propagation before reload
+          setTimeout(() => {
+              window.location.reload();
+          }, 1000);
+
+      } catch (e) {
+          console.error("Error resetting gamification:", e);
+          alert("Hubo un error al resetear: " + String(e));
+      }
+  };
+
+  // Trigger gamification check ONLY on specific actions or load, filtering by reset date
+  useEffect(() => {
+      if (user) {
+          // One-time check on mount to sync any pending updates
+          checkAchievements(user);
+      }
+  }, [user?.id, user?.lastGamificationReset]); 
 
   const clearNotification = () => setNotification(null);
 
@@ -277,12 +617,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           const today = new Date().setHours(0,0,0,0);
           
-          // Optimistic update locally? We need to read fresh user state if possible or rely on component state
-          // For simplicity, we update Firestore directly. Ideally use a transaction.
           const userRef = doc(db, 'users', auth.currentUser.uid);
-          // We assume we are inside a context with 'user', but inside setInterval closure 'user' might be stale.
-          // Using a small atomic increment would be better, but Firestore doesn't allow 'increment' + 'date check' easily in one line without logic.
-          // We will fetch fresh doc to be safe.
           try {
               const snap = await getDoc(userRef);
               if (snap.exists()) {
@@ -340,7 +675,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setLiveSession({
           isConnected: false,
-          status: 'Llamada finalizada',
+          status: 'Desconectado',
           isUserSpeaking: false,
           isAiSpeaking: false,
           toolInUse: null,
@@ -519,512 +854,482 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                                   const { title, year } = fc.args as any;
                                   setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${title}` }));
                                   
-                                  findMovieByTitleAndYear(title, year, tmdbToken).then(tmdbData => {
+                                  const movieDetails = await findMovieByTitleAndYear(title, year, tmdbToken);
+                                  if (movieDetails) {
+                                      const mappedMovie: Movie = {
+                                          id: `tmdb-${movieDetails.id}`,
+                                          tmdbId: movieDetails.id,
+                                          title: movieDetails.title,
+                                          year: parseInt(movieDetails.release_date?.split('-')[0]) || 0,
+                                          posterUrl: getImageUrl(movieDetails.poster_path),
+                                          director: 'Desconocido', // Brief detail for visualizer
+                                          genre: [],
+                                          description: movieDetails.overview,
+                                          rating: movieDetails.vote_average,
+                                          totalVotes: 0
+                                      };
+                                      setLiveSession(prev => ({ 
+                                          ...prev, 
+                                          toolInUse: null,
+                                          visualContent: [...prev.visualContent, { type: 'movie', data: mappedMovie }] 
+                                      }));
+                                  } else {
                                       setLiveSession(prev => ({ ...prev, toolInUse: null }));
-                                      if (tmdbData) {
-                                          const mappedMovie: Movie = {
-                                              id: `tmdb-${tmdbData.id}`,
-                                              tmdbId: tmdbData.id,
-                                              title: tmdbData.title,
-                                              year: parseInt(tmdbData.release_date?.split('-')[0]) || 0,
-                                              director: "IA",
-                                              genre: [],
-                                              posterUrl: getImageUrl(tmdbData.poster_path),
-                                              description: tmdbData.overview,
-                                              rating: tmdbData.vote_average,
-                                              totalVotes: 0
-                                          };
-                                          setLiveSession(prev => ({
-                                              ...prev,
-                                              visualContent: [...prev.visualContent, { type: 'movie', data: mappedMovie }]
-                                          }));
-                                      }
-                                  }).catch(() => setLiveSession(prev => ({ ...prev, toolInUse: null })));
-
-                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
-                              }
+                                  }
+                                  
+                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: 'ok' } });
+                              } 
                               else if (fc.name === 'show_person') {
                                   const { name } = fc.args as any;
                                   setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${name}` }));
-                                  searchPersonTMDB(name, tmdbToken).then(results => {
+
+                                  const people = await searchPersonTMDB(name, tmdbToken);
+                                  if (people.length > 0) {
+                                      setLiveSession(prev => ({ 
+                                          ...prev, 
+                                          toolInUse: null,
+                                          visualContent: [...prev.visualContent, { type: 'person', data: people[0] }] 
+                                      }));
+                                  } else {
                                       setLiveSession(prev => ({ ...prev, toolInUse: null }));
-                                      if (results && results.length > 0) {
-                                          setLiveSession(prev => ({
-                                              ...prev,
-                                              visualContent: [...prev.visualContent, { type: 'person', data: results[0] }]
-                                          }));
-                                      }
-                                  }).catch(() => setLiveSession(prev => ({ ...prev, toolInUse: null })));
-                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
+                                  }
+
+                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: 'ok' } });
                               }
                           }
+
                           if (functionResponses.length > 0) {
-                              sessionPromise.then(session => session.sendToolResponse({ functionResponses }));
+                             sessionPromise.then(session => {
+                                 session.sendToolResponse({
+                                     functionResponses: functionResponses
+                                 });
+                             });
                           }
                       }
                   },
-                  onclose: () => stopLiveSession(),
-                  onerror: (e) => { 
-                      console.error(e); 
-                      if (liveSessionRef.current) setLiveSession(prev => ({ ...prev, status: 'Error de conexión' })); 
+                  onerror: (e) => {
+                      console.error("Live Session Error:", e);
+                      stopLiveSession();
+                  },
+                  onclose: () => {
+                      setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Desconectado' }));
                   }
               }
           });
-          liveSessionRef.current = await sessionPromise;
-      } catch (e) {
-          console.error(e);
-          stopLiveSession(); 
-          setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Error al iniciar' }));
-      }
-  };
-
-  // ... Auth useEffect ...
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-            const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            if (userDoc.exists()) {
-              const userData = userDoc.data() as User;
-              if (userData.status === 'active' || userData.isAdmin) {
-                setUser(userData);
-                setCurrentView(ViewState.NEWS);
-              } else {
-                setUser(null);
-                setCurrentView(ViewState.LOGIN);
-              }
-            } else { setUser(null); }
-        } catch (e: any) { console.error(String(e)); setUser(null); }
-      } else { setUser(null); setCurrentView(ViewState.LOGIN); }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const getEpisodeCount = async (): Promise<number> => {
-      try {
-          const coll = collection(db, 'events');
-          const q = query(coll, where("phase", "==", "closed"));
-          const snapshot = await getCountFromServer(q);
-          return snapshot.data().count + 1; 
-      } catch (e) {
-          return 1;
-      }
-  };
-
-  const resolveVotingOutcome = async (event: CineEvent) => {
-      try {
-          let winner = event.candidates[0];
-          if (event.candidates.length > 0) {
-              const sorted = [...event.candidates].sort((a, b) => b.votes.length - a.votes.length);
-              winner = sorted[0];
-          }
-          if (winner) {
-              await updateDoc(doc(db, 'events', event.id), { 
-                  phase: 'viewing',
-                  winnerTmdbId: winner.tmdbId
-              });
-          }
-      } catch (e) { console.error(String(e)); }
-  };
-
-  const resolveTimeDecision = async (event: CineEvent, winnerMovieTitle: string) => {
-      try {
-          const counts: Record<string, number> = {};
-          if (event.timeVotes) {
-              Object.entries(event.timeVotes).forEach(([time, voters]) => {
-                  counts[time] = voters.length;
-              });
-          }
-
-          const episodeNum = await getEpisodeCount();
-          const result = await decideBestTime(counts, winnerMovieTitle, episodeNum);
           
-          await updateDoc(doc(db, 'events', event.id), {
-              finalDebateDate: Date.now(), 
-              debateDecisionMessage: `${result.chosenTime} | ${result.message}`
-          });
-      } catch (e) { console.error(String(e)); }
+          liveSessionRef.current = await sessionPromise;
+
+      } catch (e) {
+          console.error("Connection failed", e);
+          stopLiveSession();
+          alert("Error al conectar con Gemini Live API.");
+      }
   };
 
-  // AUTO NEWS GENERATOR (TRIGGER ON VISIT)
-  useEffect(() => {
-        const checkAndGenerateNews = async () => {
-            if (news.length === 0 || !tmdbToken) return; // Need news to check date, and token to search images
-            
-            const now = Date.now();
-            const lastNewsTime = news[0]?.timestamp || 0;
-            const hoursSinceLast = (now - lastNewsTime) / (1000 * 60 * 60);
-            
-            // Check daily limit (10 per day)
-            const startOfDay = new Date();
-            startOfDay.setHours(0,0,0,0);
-            const todayNewsCount = news.filter(n => n.timestamp > startOfDay.getTime() && n.type === 'general').length;
+  // --- ACTIONS ---
 
-            // Trigger if: > 2 hours since last AND < 10 today
-            if (hoursSinceLast > 2 && todayNewsCount < 10) {
-                console.log("Auto-generating news...");
-                try {
-                    const existingTitles = news.map(n => n.title);
-                    const generatedList = await generateCinemaNews(existingTitles);
-                    
-                    if (generatedList.length > 0) {
-                        const item = generatedList[0];
-                        // Try to get real image
-                        let imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400`;
-                        
-                        if (item.searchQuery && tmdbToken) {
-                             try {
-                                 // Prioritize movie image
-                                 const movies = await searchMoviesTMDB(item.searchQuery, tmdbToken);
-                                 if (movies.length > 0 && movies[0].backdrop_path) {
-                                     imgUrl = getImageUrl(movies[0].backdrop_path, 'original');
-                                 } else if (movies.length > 0 && movies[0].poster_path) {
-                                     imgUrl = getImageUrl(movies[0].poster_path, 'w500');
-                                 } else {
-                                     // Fallback person
-                                     const people = await searchPersonTMDB(item.searchQuery, tmdbToken);
-                                     if (people.length > 0 && people[0].profile_path) {
-                                         imgUrl = getImageUrl(people[0].profile_path, 'original');
-                                     }
-                                 }
-                             } catch(e) {
-                                 console.warn("Auto-news image search failed, using AI fallback");
-                             }
-                        }
+  const setTmdbToken = async (token: string) => {
+      await setDoc(doc(db, 'config', 'tmdb'), { token });
+      setTmdbTokenState(token);
+  };
 
-                        await publishNews(item.title, item.content, 'general', imgUrl);
-                    }
-                } catch (e) {
-                    console.error("Auto news error", e);
-                }
-            }
-        };
-
-        // Run check 5 seconds after load to ensure data is ready
-        const timer = setTimeout(checkAndGenerateNews, 5000);
-        return () => clearTimeout(timer);
-  }, [news.length, tmdbToken]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    const safeSnapshotError = (err: any) => console.log("Snapshot error:", String(err));
-
-    // ... Standard collections listeners ...
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setAllUsers(snapshot.docs.map(doc => doc.data() as User));
-      if (auth.currentUser) {
-          const me = snapshot.docs.find(d => d.id === auth.currentUser?.uid)?.data() as User;
-          if (me && (me.status === 'active' || me.isAdmin)) setUser(me);
+  const login = async (email: string, name: string) => {
+      try {
+          await signInWithEmailAndPassword(auth, email, name); // Password is passed as 2nd arg
+          return { success: true, message: 'Bienvenido' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
       }
-    }, safeSnapshotError);
+  };
 
-    const unsubMovies = onSnapshot(collection(db, 'movies'), (snapshot) => setMovies(snapshot.docs.map(doc => doc.data() as Movie)), safeSnapshotError);
-    const unsubRatings = onSnapshot(collection(db, 'ratings'), (snapshot) => setUserRatings(snapshot.docs.map(doc => doc.data() as UserRating)), safeSnapshotError);
-    const unsubConfig = onSnapshot(doc(db, 'settings', 'tmdb'), (doc) => { if (doc.exists()) setTmdbTokenState(doc.data().token || ''); }, safeSnapshotError);
-    const unsubNews = onSnapshot(query(collection(db, 'news'), orderBy('timestamp', 'desc'), limit(20)), (snapshot) => setNews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as NewsItem))), safeSnapshotError);
-    const unsubFeedback = onSnapshot(query(collection(db, 'feedback'), orderBy('timestamp', 'desc')), (snapshot) => setFeedbackList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AppFeedback))), safeSnapshotError);
+  const logout = async () => {
+      await signOut(auth);
+  };
 
-    // EVENTS & AUTOMATION
-    const eventsQuery = query(collection(db, 'events'), orderBy('startDate', 'desc'));
-    const unsubEvents = onSnapshot(eventsQuery, (snapshot) => {
-        if (!snapshot.empty) {
-            const evt = snapshot.docs[0].data() as CineEvent;
-            
-            // 1. Check Voting Deadline
-            if (evt.phase === 'voting' && Date.now() > evt.votingDeadline) {
-                resolveVotingOutcome(evt);
-            }
-
-            // 2. Check Time Voting Deadline (Thursday before Sunday deadline)
-            const timeVotingDeadline = evt.viewingDeadline - (3 * 24 * 60 * 60 * 1000); 
-            if (evt.phase === 'viewing' && !evt.finalDebateDate && Date.now() > timeVotingDeadline) {
-                const winnerMovie = evt.candidates.find(c => c.tmdbId === evt.winnerTmdbId);
-                resolveTimeDecision(evt, winnerMovie?.title || 'la película');
-            }
-
-            // 3. AUTO-START DISCUSSION PHASE (When scheduled time arrives)
-            // Using finalDebateDate as the trigger.
-            if (evt.phase === 'viewing' && evt.finalDebateDate && Date.now() > evt.finalDebateDate) {
-                transitionEventPhase(evt.id, 'discussion');
-            }
-
-            if (evt.phase !== 'closed') setActiveEvent(evt);
-            else setActiveEvent(null);
-        } else { setActiveEvent(null); }
-    }, safeSnapshotError);
-
-    return () => { unsubUsers(); unsubMovies(); unsubRatings(); unsubConfig(); unsubEvents(); unsubNews(); unsubFeedback(); };
-  }, [user?.id]);
-
-  // Chat Listener
-  useEffect(() => {
-      if (!user?.id || !activeEvent || activeEvent.phase !== 'discussion') { setEventMessages([]); return; }
-      const msgsQuery = query(collection(db, 'events', activeEvent.id, 'chat'), orderBy('timestamp', 'asc'));
-      const unsubChat = onSnapshot(msgsQuery, (snapshot) => setEventMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EventMessage))), (e) => console.log(String(e)));
-      return () => unsubChat();
-  }, [user?.id, activeEvent?.id, activeEvent?.phase]);
-
-  // --- CRUD METHODS ---
-  const isAdminEmail = (email: string) => email.toLowerCase().startsWith('andresroblesjimenez');
-  const login = async (email: string, pass: string) => { try { await signInWithEmailAndPassword(auth, email, pass); return { success: true, message: "OK" }; } catch (e:any) { return { success: false, message: String(e.message) }; } };
-  const logout = async () => { await signOut(auth); setUser(null); setCurrentView(ViewState.LOGIN); };
-  const register = async (email: string, name: string, pass: string, avatar?: string) => { 
-      try { 
-          await createUserWithEmailAndPassword(auth, email, pass); 
-          const u: User = { 
-              id: auth.currentUser!.uid, 
-              email, 
-              name, 
-              avatarUrl: avatar || `https://ui-avatars.com/api/?name=${name}`, 
-              watchedMovies: [], 
-              watchlist: [], 
-              status: isAdminEmail(email)?'active':'pending', 
-              isAdmin: isAdminEmail(email),
+  const register = async (email: string, name: string, password: string) => {
+      try {
+          const cred = await createUserWithEmailAndPassword(auth, email, password);
+          // Create user doc
+          const newUser: User = {
+              id: cred.user.uid,
+              email: email,
+              name: name,
+              avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+              watchedMovies: [],
+              watchlist: [],
+              status: 'pending', // Pending admin approval
+              isAdmin: false,
               xp: 0,
               level: 1,
-              completedMissions: []
-          }; 
-          await setDoc(doc(db, 'users', u.id), u); 
-          return { success: true, message: "OK" }; 
-      } catch (e:any) { return { success: false, message: String(e.message) }; } 
-  };
-  const resetPassword = async (email: string) => { try { await sendPasswordResetEmail(auth, email); return { success: true, message: "Email enviado" }; } catch(e:any) { return { success: false, message: String(e.message) }; } };
-  const updateUserProfile = async (name: string, avatarUrl: string) => { 
-      if (!user) return; 
-      try { 
-          await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); 
-          // Trigger gamification check on profile update
-          checkAchievements({ ...user, name, avatarUrl });
-      } catch (e) { console.error(String(e)); } 
-  };
-  const approveUser = async (uid: string) => { try { await updateDoc(doc(db, 'users', uid), { status: 'active' }); } catch (e) { console.error(String(e)); } };
-  const rejectUser = async (uid: string) => { try { await updateDoc(doc(db, 'users', uid), { status: 'rejected' }); } catch (e) { console.error(String(e)); } };
-  const setView = (v: ViewState, mid?: string) => { setCurrentView(v); if (mid) setSelectedMovieId(mid); };
-  
-  const addMovie = async (movie: Movie) => { try { const r = doc(db, 'movies', movie.id); const s = await getDoc(r); if (!s.exists()) await setDoc(r, movie); } catch (e) { console.error(String(e)); } };
-  const setTmdbToken = async (token: string) => { try { await setDoc(doc(db, 'settings', 'tmdb'), { token }); } catch (e) { console.error(String(e)); } };
-  
-  const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => { 
-      if (!user) return; 
-      try { 
-          const id = `${user.id}_${movieId}`; 
-          const r: UserRating = { movieId, userId: user.id, detailed: rating, rating: rating.average, comment, spoiler, timestamp: Date.now(), likes: [], dislikes: [] }; 
-          await setDoc(doc(db, 'ratings', id), r); 
-          if (!user.watchedMovies.includes(movieId)) await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayUnion(movieId), watchlist: arrayRemove(movieId) }); 
-          const all = userRatings.filter(x => x.movieId === movieId && x.userId !== user.id).concat(r); 
-          const avg = all.reduce((a,b) => a+b.rating, 0)/all.length; 
-          await updateDoc(doc(db, 'movies', movieId), { rating: parseFloat(avg.toFixed(1)), totalVotes: all.length }); 
-          
-          // Trigger gamification
-          checkAchievements(user);
-      } catch (e) { console.error(String(e)); } 
-  };
-  
-  const unwatchMovie = async (movieId: string) => { if (!user) return; try { await deleteDoc(doc(db, 'ratings', `${user.id}_${movieId}`)); await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayRemove(movieId) }); } catch (e) { console.error(String(e)); } };
-  
-  const toggleReviewVote = async (tid: string, mid: string, type: 'like'|'dislike') => { 
-      if (!user) return; 
-      try { 
-          const ref = doc(db, 'ratings', `${tid}_${mid}`); 
-          const s = await getDoc(ref); 
-          if (!s.exists()) return; 
-          const d = s.data() as UserRating; 
-          const likes = d.likes||[]; 
-          const dislikes = d.dislikes||[]; 
-          let u: any = {}; 
-          if (type === 'like') { if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); else { u['likes'] = arrayUnion(user.id); if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); } } else { if (dislikes.includes(user.id)) u['dislikes'] = arrayRemove(user.id); else { u['dislikes'] = arrayUnion(user.id); if (likes.includes(user.id)) u['likes'] = arrayRemove(user.id); } } 
-          await updateDoc(ref, u); 
-          
-          // Trigger gamification for the review author (they got a like)
-          const author = allUsers.find(u => u.id === tid);
-          if (author) checkAchievements(author);
-
-      } catch (e) { console.error(String(e)); } 
+              credits: 0, // NEW ECONOMY
+              completedMissions: [],
+              inventory: [],
+              // hasSeenWelcome is explicitly undefined so trigger fires
+          };
+          await setDoc(doc(db, 'users', cred.user.uid), newUser);
+          return { success: true, message: 'Registro exitoso. Espera aprobación del administrador.' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
+      }
   };
 
-  // --- SYNCED WATCHLIST ---
+  const resetPassword = async (email: string) => {
+      try {
+          await sendPasswordResetEmail(auth, email);
+          return { success: true, message: 'Correo de recuperación enviado.' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
+      }
+  };
+
+  const updateUserProfile = async (name: string, avatarUrl: string) => {
+      if (!user) return;
+      await updateDoc(doc(db, 'users', user.id), { name, avatarUrl });
+      // Optimistic update for checkAchievements
+      const updatedUser = { ...user, name, avatarUrl }; 
+      checkAchievements(updatedUser);
+  };
+
+  const approveUser = async (userId: string) => {
+      await updateDoc(doc(db, 'users', userId), { status: 'active' });
+  };
+
+  const rejectUser = async (userId: string) => {
+      await updateDoc(doc(db, 'users', userId), { status: 'rejected' });
+  };
+
+  const setView = (view: ViewState, movieId?: string) => {
+      setCurrentView(view);
+      if (movieId) setSelectedMovieId(movieId);
+  };
+
+  const addMovie = async (movie: Movie) => {
+      const existingRef = doc(db, 'movies', movie.id);
+      await setDoc(existingRef, movie);
+  };
+
+  const getMovie = (id: string) => movies.find(m => m.id === id);
+
+  const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => {
+      if (!user) return;
+      
+      const ratingDocId = `${user.id}_${movieId}`;
+      const ratingData: UserRating = {
+          userId: user.id,
+          movieId: movieId,
+          rating: rating.average,
+          detailed: rating,
+          comment: comment,
+          spoiler: spoiler,
+          timestamp: Date.now(),
+          likes: [],
+          dislikes: []
+      };
+
+      await setDoc(doc(db, 'ratings', ratingDocId), ratingData);
+      
+      // Update User Watched List if not present
+      if (!user.watchedMovies.includes(movieId)) {
+          await updateDoc(doc(db, 'users', user.id), {
+              watchedMovies: arrayUnion(movieId),
+              watchlist: arrayRemove(movieId) // Remove from watchlist if watched
+          });
+      }
+
+      // Recalculate Movie Average
+      const movieRatings = userRatings.filter(r => r.movieId === movieId && r.userId !== user.id).concat(ratingData);
+      const avg = movieRatings.reduce((acc, r) => acc + r.rating, 0) / movieRatings.length;
+      await updateDoc(doc(db, 'movies', movieId), {
+          rating: avg,
+          totalVotes: movieRatings.length
+      });
+      
+      // Trigger gamification check explicitly for rating
+      const updatedUser = { ...user };
+      if (!updatedUser.watchedMovies.includes(movieId)) updatedUser.watchedMovies.push(movieId);
+      checkAchievements(updatedUser);
+  };
+
+  const unwatchMovie = async (movieId: string) => {
+      if (!user) return;
+      const ratingDocId = `${user.id}_${movieId}`;
+      await deleteDoc(doc(db, 'ratings', ratingDocId));
+      await updateDoc(doc(db, 'users', user.id), {
+          watchedMovies: arrayRemove(movieId)
+      });
+      
+      // Update movie stats
+      const movieRatings = userRatings.filter(r => r.movieId === movieId && r.userId !== user.id);
+      const avg = movieRatings.length > 0 ? movieRatings.reduce((acc, r) => acc + r.rating, 0) / movieRatings.length : 0;
+      await updateDoc(doc(db, 'movies', movieId), {
+          rating: avg,
+          totalVotes: movieRatings.length
+      });
+  };
+
   const toggleWatchlist = async (movieId: string) => {
-    if (!user) return;
-    try {
-        const inWatchlist = user.watchlist.includes(movieId);
-        if (user.watchedMovies.includes(movieId)) {
-            await unwatchMovie(movieId);
-            await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) });
-        } else if (inWatchlist) {
-            await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movieId) });
-            if (activeEvent && activeEvent.phase === 'viewing') {
-                const winner = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId);
-                const winnerInternalId = movies.find(m => m.tmdbId === winner?.tmdbId)?.id;
-                if (winnerInternalId === movieId) {
-                    await updateDoc(doc(db, 'events', activeEvent.id), { committedViewers: arrayRemove(user.id) });
-                }
-            }
-        } else {
-            await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) });
-        }
-    } catch (e) { console.error(String(e)); }
+      if (!user) return;
+      if (user.watchlist.includes(movieId)) {
+          await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movieId) });
+      } else {
+          await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) });
+          triggerAction('watchlist');
+      }
+  };
+
+  const toggleReviewVote = async (targetUserId: string, movieId: string, voteType: 'like' | 'dislike') => {
+      if (!user) return;
+      const ratingId = `${targetUserId}_${movieId}`;
+      const ratingRef = doc(db, 'ratings', ratingId);
+      const ratingDoc = await getDoc(ratingRef);
+      
+      if (!ratingDoc.exists()) return;
+      
+      const data = ratingDoc.data() as UserRating;
+      const likes = data.likes || [];
+      const dislikes = data.dislikes || [];
+
+      if (voteType === 'like') {
+          if (likes.includes(user.id)) {
+              await updateDoc(ratingRef, { likes: arrayRemove(user.id) });
+          } else {
+              await updateDoc(ratingRef, { likes: arrayUnion(user.id), dislikes: arrayRemove(user.id) });
+          }
+      } else {
+          if (dislikes.includes(user.id)) {
+              await updateDoc(ratingRef, { dislikes: arrayRemove(user.id) });
+          } else {
+              await updateDoc(ratingRef, { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) });
+          }
+      }
   };
 
   const createEvent = async (eventData: Partial<CineEvent>) => {
-      if (!user?.isAdmin) return;
-      try {
-          const newEvent: CineEvent = {
-              id: Date.now().toString(),
-              themeTitle: eventData.themeTitle || 'Evento',
-              themeDescription: eventData.themeDescription || '',
-              aiReasoning: eventData.aiReasoning || '',
-              candidates: eventData.candidates || [],
-              phase: 'voting',
-              startDate: Date.now(),
-              votingDeadline: Date.now() + (7 * 24 * 60 * 60 * 1000), 
-              viewingDeadline: Date.now() + (14 * 24 * 60 * 60 * 1000),
-              backdropUrl: eventData.backdropUrl,
-              committedViewers: [],
-              committedDebaters: [],
-              timeVotes: {},
-              speakerQueue: [],
-              currentSpeakerId: null
-          };
-          await setDoc(doc(db, 'events', newEvent.id), newEvent);
-      } catch (e) { console.error(String(e)); }
+      // Close any existing active event
+      if (activeEvent) {
+          await closeEvent(activeEvent.id);
+      }
+      
+      const newEvent: CineEvent = {
+          id: `evt_${Date.now()}`,
+          themeTitle: eventData.themeTitle || 'Evento',
+          themeDescription: eventData.themeDescription || '',
+          aiReasoning: eventData.aiReasoning || '',
+          backdropUrl: eventData.backdropUrl,
+          phase: 'voting',
+          startDate: Date.now(),
+          votingDeadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+          viewingDeadline: Date.now() + 14 * 24 * 60 * 60 * 1000,
+          candidates: eventData.candidates || [],
+          committedViewers: [],
+          committedDebaters: []
+      };
+      
+      await setDoc(doc(db, 'events', newEvent.id), newEvent);
+      setActiveEvent(newEvent);
   };
 
   const closeEvent = async (eventId: string) => {
-      if (!user?.isAdmin) return;
-      try { setActiveEvent(null); await updateDoc(doc(db, 'events', eventId), { phase: 'closed' }); } catch (e) { console.error(String(e)); }
+      await updateDoc(doc(db, 'events', eventId), { phase: 'closed' });
+      setActiveEvent(null);
   };
 
   const voteForCandidate = async (eventId: string, tmdbId: number) => {
-      if (!user) return;
-      try {
-          const eventRef = doc(db, 'events', eventId);
-          const evtSnap = await getDoc(eventRef);
-          if (!evtSnap.exists()) return;
-          const evt = evtSnap.data() as CineEvent;
-          const updatedCandidates = evt.candidates.map(c => ({ ...c, votes: c.votes.filter(uid => uid !== user.id) }));
-          const target = updatedCandidates.find(c => c.tmdbId === tmdbId);
-          if (target) target.votes.push(user.id);
-          await updateDoc(eventRef, { candidates: updatedCandidates });
-      } catch (e) { console.error(String(e)); }
+      if (!user || !activeEvent) return;
+      
+      const updatedCandidates = activeEvent.candidates.map(c => {
+          // Remove user from all votes first (single vote)
+          const newVotes = c.votes.filter(uid => uid !== user.id);
+          if (c.tmdbId === tmdbId) {
+              newVotes.push(user.id);
+          }
+          return { ...c, votes: newVotes };
+      });
+      
+      await updateDoc(doc(db, 'events', eventId), { candidates: updatedCandidates });
+  };
+
+  const transitionEventPhase = async (eventId: string, phase: EventPhase, winnerId?: number) => {
+      const updateData: any = { phase };
+      if (winnerId) updateData.winnerTmdbId = winnerId;
+      await updateDoc(doc(db, 'events', eventId), updateData);
+  };
+
+  const sendEventMessage = async (eventId: string, text: string, role: 'user' | 'moderator' = 'user', audioBase64?: string) => {
+      if (!user && role === 'user') return;
+      
+      const msg: EventMessage = {
+          id: `msg_${Date.now()}_${Math.random()}`,
+          userId: role === 'user' ? user!.id : 'system',
+          userName: role === 'user' ? user!.name : 'Presentadora IA',
+          userAvatar: role === 'user' ? user!.avatarUrl : 'https://cdn-icons-png.flaticon.com/512/4712/4712035.png',
+          text,
+          timestamp: Date.now(),
+          role,
+          audioBase64
+      };
+      
+      await addDoc(collection(db, `events/${eventId}/messages`), msg);
   };
 
   const toggleEventCommitment = async (eventId: string, type: 'view' | 'debate') => {
-      if (!user || !activeEvent) return;
-      try {
-          const eventRef = doc(db, 'events', eventId);
-          const evt = (await getDoc(eventRef)).data() as CineEvent;
-          const field = type === 'view' ? 'committedViewers' : 'committedDebaters';
-          const list = evt[field] || [];
-          
-          if (list.includes(user.id)) {
-              await updateDoc(eventRef, { [field]: arrayRemove(user.id) });
-              if (type === 'view') {
-                  const winner = evt.candidates.find(c => c.tmdbId === evt.winnerTmdbId);
-                  if (winner) {
-                      const movie = movies.find(m => m.tmdbId === winner.tmdbId);
-                      if (movie) await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movie.id) });
-                  }
-              }
-          } else {
-              await updateDoc(eventRef, { [field]: arrayUnion(user.id) });
-              if (type === 'view') {
-                  const winner = evt.candidates.find(c => c.tmdbId === evt.winnerTmdbId);
-                  if (winner) {
-                      let internalId = movies.find(m => m.tmdbId === winner.tmdbId)?.id;
-                      if (!internalId) {
-                          // Would need to fetch and add logic here if robust
-                      } else {
-                          await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(internalId) });
-                      }
-                  }
-              }
-          }
-      } catch (e) { console.error(String(e)); }
+      if (!user) return;
+      const field = type === 'view' ? 'committedViewers' : 'committedDebaters';
+      const list = activeEvent?.[field] || [];
+      
+      if (list.includes(user.id)) {
+          await updateDoc(doc(db, 'events', eventId), { [field]: arrayRemove(user.id) });
+      } else {
+          await updateDoc(doc(db, 'events', eventId), { [field]: arrayUnion(user.id) });
+      }
   };
 
   const toggleTimeVote = async (eventId: string, timeSlot: string) => {
-      if (!user) return;
-      try {
-          const eventRef = doc(db, 'events', eventId);
-          const evt = (await getDoc(eventRef)).data() as CineEvent;
-          const currentVotes = evt.timeVotes || {};
-          const slotVotes = currentVotes[timeSlot] || [];
-          let newSlotVotes;
-          if (slotVotes.includes(user.id)) newSlotVotes = slotVotes.filter(uid => uid !== user.id);
-          else newSlotVotes = [...slotVotes, user.id];
-          await updateDoc(eventRef, { [`timeVotes.${timeSlot}`]: newSlotVotes });
-      } catch (e) { console.error(String(e)); }
+      if (!user || !activeEvent) return;
+      
+      const currentVotes = activeEvent.timeVotes || {};
+      const slotVotes = currentVotes[timeSlot] || [];
+      
+      let newSlotVotes;
+      if (slotVotes.includes(user.id)) {
+          newSlotVotes = slotVotes.filter(uid => uid !== user.id);
+      } else {
+          newSlotVotes = [...slotVotes, user.id];
+      }
+      
+      const newVotes = { ...currentVotes, [timeSlot]: newSlotVotes };
+      await updateDoc(doc(db, 'events', eventId), { timeVotes: newVotes });
   };
 
-  const transitionEventPhase = async (eventId: string, phase: EventPhase, winnerId?: number) => { try { const u: any = { phase }; if (winnerId) u.winnerTmdbId = winnerId; await updateDoc(doc(db, 'events', eventId), u); } catch (e) { console.error(String(e)); } };
-  
-  const sendEventMessage = async (eventId: string, text: string, role: 'user' | 'moderator' = 'user', audioBase64?: string) => { 
-      if (!user) return; 
-      try { 
-          const m: Omit<EventMessage, 'id'> = { 
-              userId: user.id, 
-              userName: role === 'moderator' ? 'IA Moderadora' : user.name, 
-              userAvatar: role === 'moderator' ? 'https://ui-avatars.com/api/?name=AI&background=d4af37&color=000' : user.avatarUrl, 
-              text, 
-              timestamp: Date.now(), 
-              role,
-              ...(audioBase64 && { audioBase64 }) 
-          }; 
-          await addDoc(collection(db, 'events', eventId, 'chat'), m); 
-          
-          // Chatting in Cineforum gives XP (Check mission)
-          if (role === 'user') checkAchievements(user);
-
-      } catch (e) { console.error(String(e)); } 
-  };
-
-  // --- TURN MANAGEMENT ---
   const raiseHand = async (eventId: string) => {
       if (!user) return;
-      try {
-          await updateDoc(doc(db, 'events', eventId), { speakerQueue: arrayUnion(user.id) });
-      } catch(e) { console.error(String(e)); }
+      await updateDoc(doc(db, 'events', eventId), { speakerQueue: arrayUnion(user.id) });
   };
 
   const grantTurn = async (eventId: string, userId: string) => {
-      try {
-          await updateDoc(doc(db, 'events', eventId), { 
-              currentSpeakerId: userId,
-              speakerQueue: arrayRemove(userId)
-          });
-      } catch(e) { console.error(String(e)); }
+      await updateDoc(doc(db, 'events', eventId), { 
+          currentSpeakerId: userId,
+          speakerQueue: arrayRemove(userId)
+      });
   };
 
   const releaseTurn = async (eventId: string) => {
-      try {
-          await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: null });
-      } catch(e) { console.error(String(e)); }
+      await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: null });
   };
 
-  const sendFeedback = async (type: 'bug'|'feature', text: string) => { if (!user) return; try { await addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() }); } catch (e) { console.error(String(e)); } };
-  const deleteFeedback = async (id: string) => { if (!user?.isAdmin) return; try { await deleteDoc(doc(db, 'feedback', id)); } catch (e) { console.error(String(e)); } };
-  const resolveFeedback = async (id: string, res?: string) => { if (!user?.isAdmin) return; try { await updateDoc(doc(db, 'feedback', id), { status: 'solved', adminResponse: res || 'Gracias.' }); const f = (await getDoc(doc(db, 'feedback', id))).data() as AppFeedback; await publishNews(f.type === 'bug' ? '🐛 Bug Corregido' : '✨ Mejora', `Solucionado: "${f.text}"`, 'update'); } catch (e) { console.error(String(e)); } };
-  const publishNews = async (title: string, content: string, type: 'general'|'update'|'event', img?: string) => { if (!user?.isAdmin) return; try { await addDoc(collection(db, 'news'), { title, content, type, timestamp: Date.now(), ...(img && { imageUrl: img }) }); } catch (e) { console.error(String(e)); } };
-  const getMovie = (id: string) => movies.find(m => m.id === id);
+  const sendFeedback = async (type: 'bug' | 'feature', text: string) => {
+      if (!user) return;
+      await addDoc(collection(db, 'feedback'), {
+          userId: user.id,
+          userName: user.name,
+          type,
+          text,
+          status: 'pending',
+          timestamp: Date.now()
+      });
+      triggerAction('feedback');
+  };
 
-  return (
-    <DataContext.Provider value={{
-      user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken,
-      topCriticId, getRemainingVoiceSeconds,
-      setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie,
-      createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote,
-      raiseHand, grantTurn, releaseTurn,
-      sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount,
-      liveSession, startLiveSession, stopLiveSession,
-      notification, clearNotification
-    }}>
-      {children}
-    </DataContext.Provider>
-  );
+  const resolveFeedback = async (feedbackId: string, response?: string) => {
+      await updateDoc(doc(db, 'feedback', feedbackId), { 
+          status: 'solved', 
+          adminResponse: response 
+      });
+      // Also publish to news if it's a solved bug/feature
+      const fb = feedbackList.find(f => f.id === feedbackId);
+      if (fb) {
+          await publishNews(
+              fb.type === 'bug' ? '🐛 Bug Exterminado' : '✨ Nueva Funcionalidad',
+              `Gracias al reporte de ${fb.userName}, hemos solucionado: "${fb.text}".`,
+              'update'
+          );
+      }
+  };
+
+  const deleteFeedback = async (id: string) => {
+      await deleteDoc(doc(db, 'feedback', id));
+  };
+
+  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => {
+      await addDoc(collection(db, 'news'), {
+          title, content, type, imageUrl, timestamp: Date.now()
+      });
+      // Gamification: Publish News Mission? (Not requested but possible)
+  };
+
+  const getEpisodeCount = async (): Promise<number> => {
+      const coll = collection(db, 'events');
+      const snap = await getCountFromServer(coll);
+      return snap.data().count + 1;
+  };
+
+  const value: DataContextType = {
+    user,
+    allUsers,
+    movies,
+    userRatings,
+    activeEvent,
+    eventMessages,
+    news,
+    feedbackList,
+    currentView,
+    selectedMovieId,
+    tmdbToken,
+    topCriticId,
+    getRemainingVoiceSeconds,
+    liveSession,
+    startLiveSession,
+    stopLiveSession,
+    setTmdbToken,
+    login,
+    logout,
+    register,
+    resetPassword,
+    updateUserProfile,
+    approveUser,
+    rejectUser,
+    setView,
+    rateMovie,
+    unwatchMovie,
+    toggleWatchlist,
+    toggleReviewVote,
+    addMovie,
+    getMovie,
+    createEvent,
+    closeEvent,
+    voteForCandidate,
+    transitionEventPhase,
+    sendEventMessage,
+    toggleEventCommitment,
+    toggleTimeVote,
+    raiseHand,
+    grantTurn,
+    releaseTurn,
+    sendFeedback,
+    resolveFeedback,
+    publishNews,
+    deleteFeedback,
+    getEpisodeCount,
+    notification,
+    clearNotification,
+    earnCredits,
+    spendCredits,
+    milestoneEvent,
+    closeMilestoneModal,
+    initialProfileTab,
+    setInitialProfileTab,
+    resetGamification,
+    triggerAction,
+    completeLevelUpChallenge
+  };
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 };
 
 export const useData = () => {
   const context = useContext(DataContext);
-  if (context === undefined) throw new Error('useData must be used within a DataProvider');
+  if (context === undefined) {
+    throw new Error('useData must be used within a DataProvider');
+  }
   return context;
 };

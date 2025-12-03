@@ -4,7 +4,7 @@ import { useData } from '../context/DataContext';
 import { Bug, Lightbulb, Send, Check } from 'lucide-react';
 
 const Feedback: React.FC = () => {
-  const { sendFeedback } = useData();
+  const { sendFeedback, triggerAction } = useData();
   const [type, setType] = useState<'bug' | 'feature'>('bug');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -16,6 +16,10 @@ const Feedback: React.FC = () => {
     
     setSending(true);
     await sendFeedback(type, text);
+    
+    // Trigger Gamification Action
+    triggerAction('feedback');
+    
     setSending(false);
     setSent(true);
     setText('');

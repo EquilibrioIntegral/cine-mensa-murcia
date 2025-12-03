@@ -1,4 +1,5 @@
 
+
 export interface Movie {
   id: string; // Internal ID
   tmdbId?: number; // TMDB ID
@@ -33,7 +34,13 @@ export interface User {
   // GAMIFICATION
   xp: number;
   level: number;
+  credits: number; // "Visiones de Taquilla" / Currency
   completedMissions: string[]; // IDs of completed missions
+  inventory?: string[]; // IDs of items owned
+  hasSeenWelcome?: boolean; // Flag for the Career Intro Modal
+  gamificationStats?: Record<string, boolean>; // Tracks actions like "visit_ranking", "search_used", "feedback_sent"
+  lastGamificationReset?: number; // Timestamp for gamification reset
+  lastSeen?: number; // Timestamp for online status
 }
 
 export interface DetailedRating {
@@ -70,7 +77,9 @@ export enum ViewState {
   MOVIE_DETAILS,
   EVENTS,
   FEEDBACK,
-  PROFILE
+  PROFILE,
+  SHOP,    // New: Tienda de Premios
+  ARCADE   // New: Zona de Minijuegos/Misiones
 }
 
 // --- NEW EVENT TYPES ---
@@ -174,15 +183,60 @@ export interface Rank {
   title: string;
   minLevel: number;
   color: string; // Tailwind color class or hex
-  icon?: string;
+  icon: any;
+}
+
+export interface TriviaQuestion {
+    id: number;
+    text: string;
+    options: string[];
+    correctAnswer: number; // Index 0-3
+    tmdbQuery?: string; // To fetch background image
+}
+
+export interface LevelChallenge {
+    level: number; // The level you are TRYING to reach (e.g., 2)
+    title: string;
+    synopsis: string; // Narrative description
+    imagePrompt: string; // For AI generation of the poster
+    type: 'trivia' | 'boss'; // Logic type
+    rewardCredits: number;
+    passingScore: number; // e.g., 16 out of 20
+    questions?: TriviaQuestion[];
 }
 
 export interface Mission {
   id: string;
+  rankId: string; // Links mission to a specific Rank
   title: string;
   description: string;
   xpReward: number;
   icon: any; // Lucide Icon component name or similar
-  condition: (user: User, stats: { ratingsCount: number, reviewsCount: number, likesReceived: number, horrorCount: number }) => boolean;
+  condition: (user: User, stats: { 
+    ratingsCount: number, 
+    reviewsCount: number, 
+    likesReceived: number, 
+    horrorCount: number,
+    actionCount: number,
+    comedyCount: number,
+    dramaCount: number,
+    scifiCount: number
+  }) => boolean;
   maxProgress?: number; // For progress bars (e.g., 5/10)
+}
+
+export interface ShopItem {
+  id: string;
+  title: string;
+  description: string;
+  cost: number;
+  minLevel: number;
+  icon: any;
+  type: 'cosmetic' | 'feature' | 'badge';
+}
+
+export interface MilestoneEvent {
+    type: 'welcome' | 'levelup' | 'challenge_ready';
+    rankTitle: string;
+    level: number;
 }

@@ -11,7 +11,7 @@ interface AvatarSelectorProps {
 }
 
 const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect }) => {
-  const { tmdbToken } = useData();
+  const { tmdbToken, triggerAction } = useData();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
@@ -30,6 +30,11 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
         setSearching(false);
     }
   };
+
+  const handleSelection = (url: string) => {
+      onSelect(url);
+      triggerAction('update_avatar');
+  }
 
   return (
     <div className="w-full">
@@ -56,7 +61,7 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
                     {searchResults.map((person) => (
                         <div 
                             key={person.id}
-                            onClick={() => onSelect(getImageUrl(person.profile_path, 'w200'))}
+                            onClick={() => handleSelection(getImageUrl(person.profile_path, 'w200'))}
                             className={`cursor-pointer rounded-full overflow-hidden aspect-square border-2 transition-all hover:scale-110 ${currentAvatar === getImageUrl(person.profile_path, 'w200') ? 'border-cine-gold shadow-[0_0_10px_rgba(212,175,55,0.5)]' : 'border-transparent hover:border-cine-gold'}`}
                             title={person.name}
                         >
@@ -70,7 +75,7 @@ const AvatarSelector: React.FC<AvatarSelectorProps> = ({ currentAvatar, onSelect
                     {STARTER_AVATARS.map((avatar, idx) => (
                         <div 
                             key={idx}
-                            onClick={() => onSelect(avatar.url)}
+                            onClick={() => handleSelection(avatar.url)}
                             className={`cursor-pointer rounded-full overflow-hidden aspect-square border-2 transition-all hover:scale-110 ${currentAvatar === avatar.url ? 'border-cine-gold shadow-[0_0_10px_rgba(212,175,55,0.5)]' : 'border-transparent hover:border-cine-gold'}`}
                             title={avatar.name}
                         >

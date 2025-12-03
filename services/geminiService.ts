@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User } from "../types";
+import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User, TriviaQuestion } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
 
 // Initialize the client safely
@@ -10,6 +10,129 @@ const ai = new GoogleGenAI({ apiKey });
 // Helper to check if API is usable
 const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
+};
+
+// --- TRIVIA GENERATOR (NEW) ---
+
+export const generateTriviaQuestions = async (
+    topic: string, 
+    count: number, 
+    difficulty: string = 'medium'
+): Promise<TriviaQuestion[]> => {
+    if (!isAiAvailable()) return [];
+
+    const prompt = `
+        Genera ${count} preguntas de trivial de cine sobre el tema: "${topic}".
+        Dificultad: ${difficulty}.
+        
+        REQUISITOS:
+        1. Las preguntas deben ser interesantes, curiosas y variadas.
+        2. "tmdbQuery" debe ser el Título de la película o nombre del actor relacionado en INGLÉS o ESPAÑOL (lo más preciso posible) para buscar su imagen de fondo en TMDB.
+        3. "correctAnswer" es el índice (0-3) de la respuesta correcta en el array de opciones.
+        4. "text" debe incluir una pequeña narrativa o contexto si es posible (ej: "Un cliente pregunta...").
+        
+        Devuelve un JSON array exacto.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.INTEGER },
+                            text: { type: Type.STRING },
+                            options: { 
+                                type: Type.ARRAY,
+                                items: { type: Type.STRING }
+                            },
+                            correctAnswer: { type: Type.INTEGER },
+                            tmdbQuery: { type: Type.STRING }
+                        },
+                        required: ["id", "text", "options", "correctAnswer", "tmdbQuery"]
+                    }
+                }
+            }
+        });
+
+        if (!response.text) return [];
+        const rawQuestions = JSON.parse(response.text) as TriviaQuestion[];
+        
+        // Ensure IDs are unique/sequential just in case
+        return rawQuestions.map((q, idx) => ({ ...q, id: idx + 1 }));
+
+    } catch (e) {
+        console.error("Trivia Gen Error:", String(e));
+        return [];
+    }
+};
+
+// --- CAREER STORY GENERATOR ---
+
+export const generateCareerStory = async (
+    userName: string,
+    rankTitle: string,
+    isNewUser: boolean
+): Promise<{ story: string, visualPrompt: string } | null> => {
+    if (!isAiAvailable()) return null;
+
+    const prompt = isNewUser 
+        ? `
+            Eres el Narrador Épico de "Cine Mensa Murcia".
+            El usuario "${userName}" acaba de unirse al club.
+            Su rango inicial es: "${rankTitle}".
+            
+            TAREA:
+            1. Escribe una historia breve (máx 3 frases) y emocionante dándole la bienvenida al mundo del cine.
+               Dile que ahora es un simple espectador, pero que tiene el potencial de convertirse en una Leyenda si completa misiones.
+               Usa un tono cinematográfico, mágico y motivador.
+            2. Crea un prompt visual en INGLÉS para generar una imagen de su "comienzo" en el cine (ej: persona entrando a un cine antiguo mágico).
+            
+            JSON: { "story": "...", "visualPrompt": "..." }
+          `
+        : `
+            Eres el Narrador Épico de "Cine Mensa Murcia".
+            El usuario "${userName}" acaba de ascender al rango: "${rankTitle}".
+            
+            TAREA:
+            1. Escribe una historia breve (máx 3 frases) felicitándole por su ascenso.
+               Describe metafóricamente sus nuevas responsabilidades o estatus en el set de rodaje.
+            2. Crea un prompt visual en INGLÉS que represente este nuevo rol de cine (ej: silla de director, alfombra roja, claqueta dorada).
+            
+            JSON: { "story": "...", "visualPrompt": "..." }
+          `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        story: { type: Type.STRING },
+                        visualPrompt: { type: Type.STRING }
+                    },
+                    required: ["story", "visualPrompt"]
+                }
+            }
+        });
+        
+        if (!response.text) return null;
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Career Story Gen Error:", String(e));
+        return { 
+            story: `¡Bienvenido ${userName}! Tu viaje hacia el estrellato comienza ahora.`, 
+            visualPrompt: "cinema projector light in dark room, cinematic atmosphere" 
+        };
+    }
 };
 
 // --- NEWS EDITOR AI ---
