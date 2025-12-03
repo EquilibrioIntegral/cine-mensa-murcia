@@ -1,12 +1,12 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news, resetGamification } = useData();
+  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news, resetGamification, automationStatus } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -30,6 +30,19 @@ const AdminPanel: React.FC = () => {
 
   const pendingUsers = allUsers.filter(u => u.status === 'pending');
   const pendingFeedback = feedbackList.filter(f => f.status === 'pending');
+
+  // Helper
+  const formatTime = (timestamp: number) => {
+      if (!timestamp) return '--:--';
+      const date = new Date(timestamp);
+      const today = new Date().toLocaleDateString();
+      const dateStr = date.toLocaleDateString();
+      
+      if (dateStr === today) {
+          return `Hoy ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+      }
+      return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+  }
 
   const handleSaveToken = async () => {
       if (!newToken.trim()) {
@@ -340,11 +353,49 @@ const AdminPanel: React.FC = () => {
                   </form>
               </div>
 
-              {/* GENERATED CONTENT COLUMN */}
-              <div>
+              {/* GENERATED CONTENT & AUTOMATION STATUS COLUMN */}
+              <div className="space-y-6">
+                  {/* MONITORING STATUS BOX */}
+                  <div className="bg-black/60 border border-gray-700 p-6 rounded-xl relative overflow-hidden">
+                      <div className="flex justify-between items-center mb-4">
+                          <h4 className="text-white font-bold flex items-center gap-2"><RefreshCw size={18} className="text-cine-gold animate-spin-slow"/> Monitor de Automatización</h4>
+                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${automationStatus.dailyCount >= 10 ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
+                              {automationStatus.dailyCount >= 10 ? 'Cupo Completo' : 'Sistema Activo'}
+                          </span>
+                      </div>
+                      
+                      <div className="space-y-4 text-sm">
+                          <div className="flex justify-between items-center text-gray-400">
+                              <span>Noticias hoy:</span>
+                              <span className="text-white font-bold">{automationStatus.dailyCount} / 10</span>
+                          </div>
+                          <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                              <div className="h-full bg-cine-gold transition-all duration-500" style={{ width: `${(automationStatus.dailyCount / 10) * 100}%` }}></div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4 mt-2">
+                              <div className="bg-black/30 p-2 rounded border border-gray-800">
+                                  <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Última Publicación</p>
+                                  <p className="text-white font-mono flex items-center gap-1">
+                                      <Clock size={12} className="text-gray-400"/>
+                                      {formatTime(automationStatus.lastRun)}
+                                  </p>
+                              </div>
+                              <div className="bg-black/30 p-2 rounded border border-gray-800">
+                                  <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Próximo Trigger</p>
+                                  <p className="text-cine-gold font-mono flex items-center gap-1">
+                                      <Clock size={12}/>
+                                      {automationStatus.dailyCount >= 10 ? 'Mañana' : (automationStatus.nextRun < Date.now() ? 'Ahora (al entrar usuario)' : formatTime(automationStatus.nextRun))}
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Manual Generation Results */}
                   {generatedNews.length > 0 && (
                       <div className="space-y-4 animate-fade-in">
-                          <h4 className="text-gray-400 text-sm font-bold uppercase">Noticias de Actualidad Encontradas:</h4>
+                          <h4 className="text-gray-400 text-sm font-bold uppercase">Resultados Manuales:</h4>
                           {generatedNews.map((news, idx) => (
                               <div key={idx} className="bg-black/40 p-4 rounded-xl border border-gray-700 hover:border-cine-gold transition-colors cursor-pointer group" onClick={() => handleSelectGeneratedNews(news)}>
                                   <h5 className="font-bold text-white mb-2 group-hover:text-cine-gold">{news.title}</h5>
@@ -358,7 +409,7 @@ const AdminPanel: React.FC = () => {
                   {generatedNews.length === 0 && !aiLoading && (
                       <div className="bg-black/20 p-8 rounded-xl border border-dashed border-gray-800 text-center text-gray-500">
                           <Globe className="mx-auto mb-3 opacity-20" size={48} />
-                          <p>Pulsa "Buscar Actualidad Cine" para generar noticias reales simuladas o escribe tu propio borrador.</p>
+                          <p>Pulsa "Buscar Actualidad Cine" para generar noticias manuales.</p>
                       </div>
                   )}
               </div>

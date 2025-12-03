@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -18,7 +16,7 @@ import Shop from './pages/Shop';
 import Arcade from './pages/Arcade';
 import CareerMilestoneModal from './components/CareerMilestoneModal';
 import { ViewState } from './types';
-import { Clock, LogOut } from 'lucide-react';
+import { Clock, ShieldAlert } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab, logout } = useData();
@@ -27,26 +25,28 @@ const AppContent: React.FC = () => {
     return <Login />;
   }
 
-  // --- NEW: BLOCK PENDING USERS ---
+  // --- BLOCK PENDING USERS (MODAL POPUP) ---
   if (user.status === 'pending') {
       return (
-          <div className="min-h-screen bg-cine-dark flex items-center justify-center p-4">
-              <div className="bg-cine-gray p-8 rounded-2xl border border-gray-700 shadow-2xl max-w-md text-center">
-                  <div className="w-20 h-20 bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <Clock size={48} className="text-yellow-500 animate-pulse" />
+          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/95 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-cine-gray p-8 rounded-2xl border border-gray-700 shadow-[0_0_50px_rgba(0,0,0,0.8)] max-w-sm w-full text-center relative overflow-hidden">
+                  {/* Decorative Background */}
+                  <div className="absolute top-0 left-0 w-full h-2 bg-yellow-600"></div>
+                  
+                  <div className="w-16 h-16 bg-yellow-900/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-yellow-700/30">
+                      <ShieldAlert size={32} className="text-yellow-500 animate-pulse" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Solicitud en Revisión</h2>
-                  <p className="text-gray-400 mb-8 leading-relaxed">
-                      Gracias por registrarte, <span className="text-cine-gold font-bold">{user.name}</span>. 
-                      <br/><br/>
-                      Tu solicitud está siendo revisada por la administración del club. 
-                      Recibirás acceso completo una vez aprobada.
+                  
+                  <h3 className="text-xl font-bold text-white mb-2">Acceso Pendiente</h3>
+                  <p className="text-gray-400 mb-8 text-sm leading-relaxed">
+                      El administrador debe autorizar tu acceso antes de que puedas ver el contenido.
                   </p>
+                  
                   <button 
                       onClick={logout}
-                      className="bg-red-900/50 hover:bg-red-900 text-red-200 px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 mx-auto transition-colors"
+                      className="w-full bg-cine-gold hover:bg-white text-black font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"
                   >
-                      <LogOut size={18}/> Cerrar Sesión
+                      Aceptar
                   </button>
               </div>
           </div>

@@ -65,6 +65,10 @@ function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
 // MAX DAILY SECONDS (5 Minutes)
 const DAILY_VOICE_LIMIT_SECONDS = 300; 
 
+// AUTO NEWS CONFIG
+const MAX_DAILY_NEWS = 10;
+const NEWS_INTERVAL_MS = 90 * 60 * 1000; // 90 minutes between auto news
+
 interface DataContextType {
   user: User | null;
   allUsers: User[]; 
@@ -145,6 +149,9 @@ interface DataContextType {
 
   // Manual Level Up Logic
   completeLevelUpChallenge: (nextLevel: number, rewardCredits: number) => Promise<void>;
+  
+  // Automation Status
+  automationStatus: { lastRun: number, dailyCount: number, nextRun: number };
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -166,6 +173,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [notification, setNotification] = useState<{ message: string, type: 'level' | 'mission' | 'shop' } | null>(null);
   const [milestoneEvent, setMilestoneEvent] = useState<MilestoneEvent | null>(null);
   const [initialProfileTab, setInitialProfileTab] = useState<'profile' | 'career'>('profile');
+
+  // Automation Status for Admin
+  const [automationStatus, setAutomationStatus] = useState({ lastRun: 0, dailyCount: 0, nextRun: 0 });
 
   // Top Critic Calculation
   const [topCriticId, setTopCriticId] = useState<string | null>(null);
@@ -191,6 +201,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   // Timer Ref for usage tracking
   const usageIntervalRef = useRef<number | null>(null);
+  
+  // Ref to ensure automation runs only once per load
+  const automationCheckedRef = useRef(false);
 
   // AUTH LISTENER
   useEffect(() => {
@@ -202,6 +215,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (docSnap.exists()) {
                 const userData = docSnap.data() as User;
                 setUser(userData);
+                // REDIRECT FIX: If user is loaded and view is still LOGIN, switch to NEWS
+                setCurrentView(prev => prev === ViewState.LOGIN ? ViewState.NEWS : prev);
             }
         });
         return () => unsubscribeUser();
@@ -213,15 +228,124 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // SAFE REDIRECT EFFECT
+  // AUTOMATIC NEWS GENERATION TRIGGER
   useEffect(() => {
-      if (user && currentView === ViewState.LOGIN) {
-          // Only redirect if active or admin. Pending users stay on login (if signed out) or hit App.tsx block.
-          if (user.status === 'active' || user.isAdmin) {
-              setCurrentView(ViewState.NEWS);
+      const checkAndGenerateAutoNews = async () => {
+          if (!tmdbToken) return; // Need token for images
+          
+          const configRef = doc(db, 'config', 'news_automation');
+          
+          try {
+              const snap = await getDoc(configRef);
+              const now = Date.now();
+              const todayStr = new Date().toLocaleDateString('es-ES');
+              
+              let data: any;
+
+              // CRITICAL FIX: Ensure document exists. If not, create it.
+              if (!snap.exists()) {
+                  data = { lastRun: 0, dailyCount: 0, currentDate: todayStr, isGenerating: false };
+                  await setDoc(configRef, data);
+              } else {
+                  data = snap.data();
+                  // 1. Reset if new day
+                  if (data.currentDate !== todayStr) {
+                      data = { ...data, dailyCount: 0, currentDate: todayStr, isGenerating: false };
+                      // Use setDoc to ensure we overwrite/clean state properly for the new day
+                      await setDoc(configRef, data);
+                  }
+              }
+
+              // Update local state for admin UI
+              setAutomationStatus({ 
+                  lastRun: data.lastRun, 
+                  dailyCount: data.dailyCount,
+                  nextRun: data.lastRun + NEWS_INTERVAL_MS
+              });
+
+              // 2. Conditions check
+              // - Not currently generating
+              // - Daily limit not reached
+              // - Time interval passed
+              if (data.isGenerating) return;
+              if (data.dailyCount >= MAX_DAILY_NEWS) return;
+              if (now - data.lastRun < NEWS_INTERVAL_MS) return;
+
+              // 3. START GENERATION
+              // Lock it first (We are sure doc exists now)
+              await updateDoc(configRef, { isGenerating: true });
+              
+              // Generate Logic
+              const existingTitles = news.map(n => n.title);
+              const generatedItems = await generateCinemaNews(existingTitles);
+              
+              if (generatedItems.length > 0) {
+                  const item = generatedItems[0]; // Take only the first one
+                  let finalImage = '';
+                  
+                  // Try to fetch real image
+                  if (item.searchQuery && tmdbToken) {
+                      try {
+                          const movieResults = await searchMoviesTMDB(item.searchQuery, tmdbToken);
+                          if (movieResults.length > 0) {
+                              finalImage = getImageUrl(movieResults[0].backdrop_path || movieResults[0].poster_path, 'original');
+                          } else {
+                              const personResults = await searchPersonTMDB(item.searchQuery, tmdbToken);
+                              if (personResults.length > 0) {
+                                  finalImage = getImageUrl(personResults[0].profile_path, 'original');
+                              }
+                          }
+                      } catch (e) { console.error("Auto-news image fetch error", e); }
+                  }
+                  
+                  if (!finalImage) {
+                      finalImage = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400&model=flux`;
+                  }
+
+                  await addDoc(collection(db, 'news'), {
+                      title: item.title,
+                      content: item.content,
+                      type: 'general',
+                      imageUrl: finalImage,
+                      timestamp: Date.now()
+                  });
+
+                  // 4. Update Config on Success
+                  await updateDoc(configRef, {
+                      lastRun: Date.now(),
+                      dailyCount: increment(1),
+                      isGenerating: false
+                  });
+                  
+                  // Update local state immediately
+                  setAutomationStatus({
+                      lastRun: Date.now(),
+                      dailyCount: data.dailyCount + 1,
+                      nextRun: Date.now() + NEWS_INTERVAL_MS
+                  });
+              } else {
+                  // If generation failed, just unlock
+                  await updateDoc(configRef, { isGenerating: false });
+              }
+
+          } catch (e) {
+              console.error("Auto News Error:", e);
+              // Unlock on error if possible
+              try { 
+                  // Safe unlock attempt
+                  const d = await getDoc(configRef);
+                  if (d.exists()) {
+                      await updateDoc(configRef, { isGenerating: false }); 
+                  }
+              } catch(err){}
           }
+      };
+
+      if (user && tmdbToken && !automationCheckedRef.current) {
+          checkAndGenerateAutoNews();
+          automationCheckedRef.current = true;
       }
-  }, [user, currentView]);
+  }, [user, tmdbToken, news]); // Dependencies ensure it runs when user enters and we have token/news data
 
   // DATA SUBSCRIPTIONS
   useEffect(() => {
@@ -259,9 +383,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
              setTmdbTokenState(docSnap.data().token);
          }
       });
+      
+      // Listen to Automation Config changes real-time
+      const unsubAuto = onSnapshot(doc(db, 'config', 'news_automation'), (docSnap) => {
+          if (docSnap.exists()) {
+              const d = docSnap.data();
+              // Verify if date is today, if not, UI should show 0 (even if DB isn't updated yet)
+              const todayStr = new Date().toLocaleDateString('es-ES');
+              const isToday = d.currentDate === todayStr;
+              
+              setAutomationStatus({
+                  lastRun: d.lastRun,
+                  dailyCount: isToday ? d.dailyCount : 0,
+                  nextRun: d.lastRun + NEWS_INTERVAL_MS
+              });
+          }
+      });
 
       return () => {
-          unsubUsers(); unsubMovies(); unsubRatings(); unsubNews(); unsubFeedback(); unsubEvent(); unsubConfig();
+          unsubUsers(); unsubMovies(); unsubRatings(); unsubNews(); unsubFeedback(); unsubEvent(); unsubConfig(); unsubAuto();
       };
   }, []);
 
@@ -829,7 +969,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, triggerAction, completeLevelUpChallenge
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, triggerAction, completeLevelUpChallenge, automationStatus
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
