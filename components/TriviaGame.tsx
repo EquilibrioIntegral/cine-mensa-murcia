@@ -4,7 +4,7 @@ import { LevelChallenge, TriviaQuestion } from '../types';
 import { useData } from '../context/DataContext';
 import { searchMoviesTMDB, getImageUrl } from '../services/tmdbService';
 import { generateTriviaQuestions } from '../services/geminiService';
-import { CheckCircle, XCircle, Trophy, Frown, Loader2, ShoppingBag, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, Trophy, Frown, Loader2, ShoppingBag, ArrowLeft, ZapOff, AlertTriangle } from 'lucide-react';
 
 interface TriviaGameProps {
   challenge: LevelChallenge;
@@ -12,11 +12,11 @@ interface TriviaGameProps {
   onClose: () => void;
 }
 
-// Fallback questions in case everything fails to prevent crash
+// 3. PREGUNTAS DE EMERGENCIA (Hardcoded Fallback)
 const FALLBACK_QUESTIONS: TriviaQuestion[] = [
     {
         id: 1,
-        text: "Hubo un error de conexión con la IA. Pregunta de emergencia: ¿Quién dirigió 'Parque Jurásico'?",
+        text: "Hubo un pequeño error de guion con la IA. Pregunta de emergencia: ¿Quién dirigió 'Parque Jurásico'?",
         options: ["Steven Spielberg", "George Lucas", "James Cameron", "Ridley Scott"],
         correctAnswer: 0,
         tmdbQuery: "Jurassic Park"
@@ -30,32 +30,65 @@ const FALLBACK_QUESTIONS: TriviaQuestion[] = [
     },
     {
         id: 3,
-        text: "¿Qué actor interpreta a Iron Man?",
+        text: "¿Qué actor interpreta a Iron Man en el MCU?",
         options: ["Robert Downey Jr.", "Chris Evans", "Chris Hemsworth", "Mark Ruffalo"],
         correctAnswer: 0,
         tmdbQuery: "Iron Man"
+    },
+    {
+        id: 4,
+        text: "¿Cuál es la película más taquillera de la historia (sin ajuste de inflación)?",
+        options: ["Avatar", "Avengers: Endgame", "Titanic", "Star Wars: El despertar de la fuerza"],
+        correctAnswer: 0,
+        tmdbQuery: "Avatar"
+    },
+    {
+        id: 5,
+        text: "¿Qué película ganó el Oscar a Mejor Película en 2020 haciendo historia?",
+        options: ["Parásitos", "1917", "Joker", "Érase una vez en Hollywood"],
+        correctAnswer: 0,
+        tmdbQuery: "Parasite"
     }
 ];
+
+// 1. FILTRO DE CALIDAD (VALIDACIÓN)
+const validateQuestions = (qs: any[]): TriviaQuestion[] => {
+    if (!Array.isArray(qs)) return [];
+    return qs.filter((q) => {
+        const hasText = typeof q.text === 'string' && q.text.trim().length > 0;
+        const hasOptions = Array.isArray(q.options) && q.options.length >= 2 && q.options.every((o: any) => typeof o === 'string');
+        const hasAnswer = typeof q.correctAnswer === 'number' && q.correctAnswer >= 0 && q.correctAnswer < q.options.length;
+        return hasText && hasOptions && hasAnswer;
+    });
+};
 
 const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose }) => {
   const { tmdbToken } = useData();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [bgImage, setBgImage] = useState<string>('');
-  const [gameState, setGameState] = useState<'intro' | 'loading' | 'playing' | 'feedback' | 'finished'>('intro');
+  const [gameState, setGameState] = useState<'intro' | 'loading' | 'playing' | 'feedback' | 'finished' | 'error'>('intro');
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean>(false);
   const [currentTheme, setCurrentTheme] = useState('');
+  const [errorType, setErrorType] = useState<'generic' | 'quota'>('generic');
   
   // Dynamic Questions State
   const [questions, setQuestions] = useState<TriviaQuestion[]>(challenge.questions || []);
   
-  // Safely get current question
+  // Safely get current question with Render Protection
   const currentQuestion = questions && questions.length > 0 ? questions[currentQuestionIndex] : null;
-  const passed = score >= challenge.passingScore;
+  
+  // DYNAMIC PASSING SCORE:
+  // If we fell back to 5 questions, we can't require 16.
+  // We require 80% of the actual question count.
+  const actualPassingScore = Math.ceil(questions.length * 0.8);
+  const passed = score >= actualPassingScore;
 
-  // Fetch background image based on TMDB Query
+  // Fetch background image based on TMDB Query (For Q2 onwards or fallback)
   useEffect(() => {
+    // Skip this effect for the first question if we are just starting (handled by preload in handleStart)
+    // But allow it for subsequent navigation
     if (gameState === 'playing' && currentQuestion?.tmdbQuery && tmdbToken) {
       const fetchBg = async () => {
         try {
@@ -64,48 +97,82 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
             setBgImage(getImageUrl(results[0].backdrop_path, 'original'));
           }
         } catch (e) {
-          console.error(e);
+          console.error("BG fetch error", e);
         }
       };
-      fetchBg();
-    } else {
-        setBgImage(''); // Reset or default
-    }
+      
+      // Delay slightly to prevent flashing if preload worked, mostly for Q2+
+      const t = setTimeout(fetchBg, 100);
+      return () => clearTimeout(t);
+    } 
   }, [currentQuestionIndex, gameState, tmdbToken, currentQuestion]);
 
   const handleStart = async () => {
-      // SETTING TOPIC TO GENERAL CINEMA (As requested)
       const generalTheme = "Cultura General de Cine";
       setCurrentTheme(generalTheme);
-      
       setGameState('loading');
       
+      let safeQuestions: TriviaQuestion[] = [];
+
       try {
-          // Define a broad, varied topic for the AI
           const topic = challenge.type === 'boss' 
               ? challenge.title + " (Dificultad: Experto, preguntas técnicas sobre rodajes y dirección)" 
               : "Cine General Variado: Mezcla de todas las épocas, géneros populares, actores famosos, citas icónicas y películas premiadas. Que sea accesible y divertido.";
               
-          const count = challenge.questions && challenge.questions.length > 0 ? challenge.questions.length : 20;
+          const count = challenge.questions && challenge.questions.length > 0 ? challenge.questions.length : 10;
           
-          // Call AI Service
+          // Call AI
           const aiQuestions = await generateTriviaQuestions(topic, count, challenge.type === 'boss' ? 'hard' : 'medium');
           
-          if (aiQuestions && aiQuestions.length > 0) {
-              setQuestions(aiQuestions);
+          // Validate AI output
+          const validQuestions = validateQuestions(aiQuestions);
+
+          if (validQuestions.length > 0) {
+              safeQuestions = validQuestions;
           } else {
-              // Fallback to static if AI fails
-              console.warn("AI didn't return questions, using fallback/static");
-              const staticQuestions = challenge.questions && challenge.questions.length > 0 ? challenge.questions : FALLBACK_QUESTIONS;
-              setQuestions(staticQuestions);
+              console.warn("AI returned invalid questions, using fallback");
+              safeQuestions = FALLBACK_QUESTIONS;
           }
-      } catch (e) {
+      } catch (e: any) {
+          // CHECK FOR QUOTA ERROR
+          const errStr = String(e).toLowerCase();
+          if (errStr.includes('429') || errStr.includes('quota') || errStr.includes('exhausted')) {
+              setErrorType('quota');
+              setGameState('error');
+              return; // Stop here, show specific error screen
+          }
+
           console.error("AI Gen Failed, using static/fallback", e);
-          const staticQuestions = challenge.questions && challenge.questions.length > 0 ? challenge.questions : FALLBACK_QUESTIONS;
-          setQuestions(staticQuestions);
-      } finally {
-          setGameState('playing');
+          safeQuestions = FALLBACK_QUESTIONS;
       }
+
+      // 2. PRECARGA INTELIGENTE (IMAGEN)
+      // Check if we have questions and token. Try to load first image BEFORE showing game.
+      if (safeQuestions.length > 0 && safeQuestions[0].tmdbQuery && tmdbToken) {
+          try {
+              const results = await searchMoviesTMDB(safeQuestions[0].tmdbQuery, tmdbToken);
+              if (results && results.length > 0 && results[0].backdrop_path) {
+                  const url = getImageUrl(results[0].backdrop_path, 'original');
+                  
+                  // Force browser to download image
+                  const imgLoader = new Image();
+                  imgLoader.src = url;
+                  
+                  // Wait for load or timeout (max 1.5s to keep it snappy)
+                  await Promise.race([
+                      new Promise((resolve) => { imgLoader.onload = resolve; imgLoader.onerror = resolve; }),
+                      new Promise((resolve) => setTimeout(resolve, 1500)) 
+                  ]);
+                  
+                  setBgImage(url);
+              }
+          } catch(e) {
+              console.warn("Image preloading failed", e);
+          }
+      }
+
+      setQuestions(safeQuestions);
+      setGameState('playing');
   };
 
   const handleAnswer = (optionIndex: number) => {
@@ -133,9 +200,11 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
   };
 
   const handleFinish = (action: 'close' | 'shop') => {
+      // Explicitly pass the calculated 'passed' status
       onComplete(score, passed, action);
   };
 
+  // --- VIEW: INTRO ---
   if (gameState === 'intro') {
       return (
           <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
@@ -150,9 +219,8 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
                   <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 mb-8 inline-block">
                       <p className="text-gray-300 font-bold mb-2">OBJETIVO DE LA MISIÓN</p>
                       <ul className="text-sm text-gray-400 text-left space-y-2">
-                          <li>• Responde correctamente a <span className="text-white font-bold">{challenge.passingScore}</span> de <span className="text-white font-bold">{challenge.questions?.length || 20}</span> preguntas.</li>
+                          <li>• Responde correctamente al <span className="text-white font-bold">80%</span> de las preguntas.</li>
                           <li>• Cada pregunta tiene un contexto visual.</li>
-                          <li>• Las preguntas son de cine general variado.</li>
                       </ul>
                   </div>
 
@@ -167,16 +235,45 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
       );
   }
 
+  // --- VIEW: LOADING ---
   if (gameState === 'loading') {
       return (
           <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
              <Loader2 size={64} className="text-cine-gold animate-spin mb-4" />
              <h2 className="text-2xl font-bold text-white">El Director está escribiendo el guion...</h2>
-             <p className="text-gray-400 mt-2">Generando preguntas nuevas con IA sobre: <span className="text-cine-gold font-bold">{currentTheme}</span></p>
+             <p className="text-gray-400 mt-2">Generando preguntas únicas con IA sobre: <span className="text-cine-gold font-bold">{currentTheme}</span></p>
+             <p className="text-xs text-gray-600 mt-4 animate-pulse">Pre-cargando escenas visuales...</p>
           </div>
       );
   }
 
+  // --- VIEW: ERROR (SPECIFIC MESSAGE) ---
+  if (gameState === 'error' && errorType === 'quota') {
+      return (
+          <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
+              <div className="bg-gray-900 border border-red-500/50 p-8 rounded-2xl max-w-md shadow-[0_0_50px_rgba(220,38,38,0.3)]">
+                  <div className="w-20 h-20 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <ZapOff size={40} className="text-red-500" />
+                  </div>
+                  <h2 className="text-2xl font-black text-white mb-2 uppercase">EL CAMERINO ESTÁ CERRADO</h2>
+                  <p className="text-gray-300 mb-6 leading-relaxed">
+                      Nuestra IA Guionista ha trabajado demasiado hoy y necesita un descanso para recargar su creatividad.
+                  </p>
+                  <p className="text-sm text-gray-500 mb-8 italic">
+                      Por favor, inténtalo de nuevo en unos minutos.
+                  </p>
+                  <button 
+                    onClick={onClose}
+                    className="w-full bg-gray-700 hover:bg-white hover:text-black text-white font-bold py-3 rounded-xl transition-all uppercase tracking-wide"
+                  >
+                      Entendido, volveré luego
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
+  // --- VIEW: FINISHED ---
   if (gameState === 'finished') {
       return (
           <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
@@ -184,53 +281,58 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
                   {passed ? (
                       <>
                         <div className="absolute inset-0 bg-green-900/20"></div>
-                        <Trophy size={80} className="text-cine-gold mx-auto mb-6 animate-pulse" />
-                        <h2 className="text-3xl font-black text-white mb-2 uppercase">¡MISIÓN CUMPLIDA!</h2>
-                        <p className="text-gray-300 mb-6">Has demostrado tu valía, cinéfilo.</p>
-                        <div className="text-6xl font-black text-green-500 mb-8">{score} <span className="text-lg text-gray-500">/ {questions.length}</span></div>
-                        
-                        {/* REWARDS CALCULATION DISPLAY */}
-                        <div className="bg-black/40 p-4 rounded-lg border border-cine-gold/30 mb-6">
-                            <p className="text-gray-400 text-sm font-bold uppercase mb-1">Recompensas Obtenidas</p>
-                            <p className="text-2xl font-black text-cine-gold">+{challenge.rewardCredits} Créditos</p>
-                            <p className="text-green-400 text-xs font-bold mt-1">¡NIVEL SUBIDO!</p>
-                        </div>
+                        <div className="relative z-10">
+                            <Trophy size={80} className="text-cine-gold mx-auto mb-6 animate-pulse" />
+                            <h2 className="text-3xl font-black text-white mb-2 uppercase">¡MISIÓN CUMPLIDA!</h2>
+                            <p className="text-gray-300 mb-6">Has demostrado tu valía, cinéfilo.</p>
+                            <div className="text-6xl font-black text-green-500 mb-8">{score} <span className="text-lg text-gray-500">/ {questions.length}</span></div>
+                            
+                            <div className="bg-black/40 p-4 rounded-lg border border-cine-gold/30 mb-6">
+                                <p className="text-gray-400 text-sm font-bold uppercase mb-1">Recompensas Obtenidas</p>
+                                <p className="text-2xl font-black text-cine-gold">+{challenge.rewardCredits} Créditos</p>
+                                <p className="text-green-400 text-xs font-bold mt-1">¡NIVEL SUBIDO!</p>
+                            </div>
 
-                        <div className="space-y-3">
-                            <button 
-                                onClick={() => handleFinish('shop')}
-                                className="w-full bg-cine-gold text-black font-bold py-3 rounded-lg hover:bg-white transition-colors uppercase flex items-center justify-center gap-2 shadow-lg shadow-cine-gold/20"
-                            >
-                                <ShoppingBag size={20}/> Ir a la Tienda
-                            </button>
-                            <button 
-                                onClick={() => handleFinish('close')}
-                                className="w-full bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors uppercase flex items-center justify-center gap-2"
-                            >
-                                <ArrowLeft size={20}/> Volver al Arcade
-                            </button>
+                            {/* Relative z-10 ensures buttons are clickable above background overlays */}
+                            <div className="space-y-3 relative z-10">
+                                <button 
+                                    onClick={() => handleFinish('shop')}
+                                    className="w-full bg-cine-gold text-black font-bold py-3 rounded-lg hover:bg-white transition-colors uppercase flex items-center justify-center gap-2 shadow-lg shadow-cine-gold/20 cursor-pointer"
+                                >
+                                    <ShoppingBag size={20}/> Ir a la Tienda
+                                </button>
+                                <button 
+                                    onClick={() => handleFinish('close')}
+                                    className="w-full bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors uppercase flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                    <ArrowLeft size={20}/> Volver al Arcade
+                                </button>
+                            </div>
                         </div>
                       </>
                   ) : (
                       <>
                         <div className="absolute inset-0 bg-red-900/20"></div>
-                        <Frown size={80} className="text-red-500 mx-auto mb-6" />
-                        <h2 className="text-3xl font-black text-white mb-2 uppercase">CORTE... ¡TOMA FALSA!</h2>
-                        <p className="text-gray-300 mb-6">No has alcanzado la puntuación necesaria.</p>
-                        <div className="text-6xl font-black text-red-500 mb-8">{score} <span className="text-lg text-gray-500">/ {questions.length}</span></div>
-                        <div className="flex gap-4">
-                            <button 
-                                onClick={onClose}
-                                className="flex-1 bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors uppercase"
-                            >
-                                Salir
-                            </button>
-                            <button 
-                                onClick={() => { setScore(0); setCurrentQuestionIndex(0); handleStart(); }}
-                                className="flex-1 bg-white text-black font-bold py-3 rounded-lg hover:bg-gray-200 transition-colors uppercase"
-                            >
-                                Reintentar
-                            </button>
+                        <div className="relative z-10">
+                            <Frown size={80} className="text-red-500 mx-auto mb-6" />
+                            <h2 className="text-3xl font-black text-white mb-2 uppercase">CORTE... ¡TOMA FALSA!</h2>
+                            <p className="text-gray-300 mb-6">No has alcanzado la puntuación necesaria.</p>
+                            <div className="text-6xl font-black text-red-500 mb-8">{score} <span className="text-lg text-gray-500">/ {questions.length}</span></div>
+                            
+                            <div className="relative z-10 flex gap-4">
+                                <button 
+                                    onClick={onClose}
+                                    className="flex-1 bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors uppercase cursor-pointer"
+                                >
+                                    Salir
+                                </button>
+                                <button 
+                                    onClick={() => { setScore(0); setCurrentQuestionIndex(0); handleStart(); }}
+                                    className="flex-1 bg-white text-black font-bold py-3 rounded-lg hover:bg-gray-200 transition-colors uppercase cursor-pointer"
+                                >
+                                    Reintentar
+                                </button>
+                            </div>
                         </div>
                       </>
                   )}
@@ -239,14 +341,13 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
       );
   }
 
-  // --- CRASH PREVENTION ---
-  // If we are in playing state but no question is found (index out of bounds or empty array), show error instead of crashing
+  // --- VIEW: PLAYING (CRASH PREVENTION) ---
   if (gameState === 'playing' && !currentQuestion) {
       return (
           <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
               <AlertTriangle size={64} className="text-red-500 mb-4" />
               <h2 className="text-2xl font-bold text-white">Error de Producción</h2>
-              <p className="text-gray-400 mb-6">No se pudieron cargar las preguntas. Inténtalo de nuevo.</p>
+              <p className="text-gray-400 mb-6">No se pudieron cargar las preguntas (Error Interno).</p>
               <button 
                 onClick={onClose}
                 className="bg-gray-700 text-white px-6 py-2 rounded-full font-bold"
@@ -257,9 +358,10 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
       );
   }
 
+  // --- VIEW: PLAYING (NORMAL) ---
   return (
     <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-        {/* Background Layer - Increased opacity and better gradient for visibility */}
+        {/* Background Layer */}
         <div className="absolute inset-0 z-0">
             {bgImage && (
                 <img 
@@ -268,7 +370,6 @@ const TriviaGame: React.FC<TriviaGameProps> = ({ challenge, onComplete, onClose 
                     alt="Background" 
                 />
             )}
-            {/* Lighter gradient to show more image details */}
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/60"></div>
         </div>
 

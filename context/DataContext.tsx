@@ -1,5 +1,4 @@
 
-
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
 import { auth, db } from '../firebase';
@@ -203,8 +202,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (docSnap.exists()) {
                 const userData = docSnap.data() as User;
                 setUser(userData);
-                // Redirect if pending/rejected logic can be handled here or in UI
-                if (currentView === ViewState.LOGIN) setCurrentView(ViewState.NEWS);
+                // NOTE: Removed redirect here to prevent infinite loop/random jumps on heartbeat updates
             } else {
                 // Should create? Handled in register.
             }
@@ -217,6 +215,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     return () => unsubscribe();
   }, []);
+
+  // SAFE REDIRECT EFFECT: Only redirect on explicit Login state when user is ready
+  useEffect(() => {
+      if (user && currentView === ViewState.LOGIN) {
+          setCurrentView(ViewState.NEWS);
+      }
+  }, [user, currentView]);
 
   // DATA SUBSCRIPTIONS
   useEffect(() => {
@@ -329,17 +334,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const spendCredits = async (amount: number, itemId: string): Promise<boolean> => {
       if (!user) return false;
-      if ((user.credits || 0) < amount) {
+      
+      const canAfford = (user.credits || 0) >= amount;
+      
+      // Only block if NOT admin. Admins can spend even with 0 credits.
+      if (!canAfford && !user.isAdmin) {
           alert("No tienes suficientes créditos.");
           return false;
       }
+      
       try {
-          const newCredits = (user.credits || 0) - amount;
+          // Admin perk: Items are free for testing (cost is 0)
+          // Normal user: pays amount
+          const costToDeduct = user.isAdmin ? 0 : amount;
+          
+          const newCredits = (user.credits || 0) - costToDeduct;
           await updateDoc(doc(db, 'users', user.id), {
               credits: newCredits,
               inventory: arrayUnion(itemId)
           });
-          setNotification({ message: `¡Artículo comprado!`, type: 'shop' });
+          setNotification({ 
+              message: user.isAdmin ? `¡Artículo activado (Admin)!` : `¡Artículo comprado!`, 
+              type: 'shop' 
+          });
           return true;
       } catch (e) {
           console.error("Error spending credits", e);

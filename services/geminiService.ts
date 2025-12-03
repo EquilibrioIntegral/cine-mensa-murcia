@@ -77,12 +77,16 @@ export const generateTriviaQuestions = async (
 export const generateCareerStory = async (
     userName: string,
     rankTitle: string,
-    isNewUser: boolean
+    isNewUser: boolean,
+    level?: number,
+    isRankUp?: boolean
 ): Promise<{ story: string, visualPrompt: string } | null> => {
     if (!isAiAvailable()) return null;
 
-    const prompt = isNewUser 
-        ? `
+    let prompt = "";
+
+    if (isNewUser) {
+        prompt = `
             Eres el Narrador Épico de "Cine Mensa Murcia".
             El usuario "${userName}" acaba de unirse al club.
             Su rango inicial es: "${rankTitle}".
@@ -94,18 +98,34 @@ export const generateCareerStory = async (
             2. Crea un prompt visual en INGLÉS para generar una imagen de su "comienzo" en el cine (ej: persona entrando a un cine antiguo mágico).
             
             JSON: { "story": "...", "visualPrompt": "..." }
-          `
-        : `
+          `;
+    } else if (isRankUp) {
+        prompt = `
             Eres el Narrador Épico de "Cine Mensa Murcia".
-            El usuario "${userName}" acaba de ascender al rango: "${rankTitle}".
+            El usuario "${userName}" acaba de ascender al rango: "${rankTitle}" (Nivel ${level}).
             
             TAREA:
-            1. Escribe una historia breve (máx 3 frases) felicitándole por su ascenso.
+            1. Escribe una historia breve (máx 3 frases) felicitándole por su ascenso de RANGO.
                Describe metafóricamente sus nuevas responsabilidades o estatus en el set de rodaje.
             2. Crea un prompt visual en INGLÉS que represente este nuevo rol de cine (ej: silla de director, alfombra roja, claqueta dorada).
             
             JSON: { "story": "...", "visualPrompt": "..." }
           `;
+    } else {
+        // Just Level Up (Not a Rank Up)
+        prompt = `
+            Eres el Narrador Épico de "Cine Mensa Murcia".
+            El usuario "${userName}" acaba de subir al Nivel ${level}.
+            Su rango actual sigue siendo "${rankTitle}".
+            
+            TAREA:
+            1. Escribe una historia breve (máx 3 frases) felicitándole por su progreso, experiencia ganada y constancia.
+               Anímalo a seguir completando misiones para alcanzar el siguiente rango profesional.
+            2. Crea un prompt visual en INGLÉS que represente progreso, aprendizaje, estudio de guiones o entrenamiento en cine.
+            
+            JSON: { "story": "...", "visualPrompt": "..." }
+        `;
+    }
 
     try {
         const response = await ai.models.generateContent({
@@ -129,8 +149,10 @@ export const generateCareerStory = async (
     } catch (e) {
         console.error("Career Story Gen Error:", String(e));
         return { 
-            story: `¡Bienvenido ${userName}! Tu viaje hacia el estrellato comienza ahora.`, 
-            visualPrompt: "cinema projector light in dark room, cinematic atmosphere" 
+            story: isRankUp 
+                ? `¡Felicidades ${userName}! Has alcanzado el rango de ${rankTitle}.` 
+                : `¡Buen trabajo ${userName}! Has subido al nivel ${level}.`, 
+            visualPrompt: "cinema award trophy celebration cinematic lighting" 
         };
     }
 };

@@ -2,7 +2,7 @@
 import React from 'react';
 import { useData } from '../context/DataContext';
 import { SHOP_ITEMS } from '../constants';
-import { ShoppingBag, Lock, Check, Ticket } from 'lucide-react';
+import { ShoppingBag, Lock, Check, Ticket, Shield } from 'lucide-react';
 import RankBadge from '../components/RankBadge';
 
 const Shop: React.FC = () => {
@@ -11,8 +11,12 @@ const Shop: React.FC = () => {
   if (!user) return null;
 
   const handlePurchase = async (item: any) => {
-      if (user.credits < item.cost) return;
-      if (user.level < item.minLevel) return;
+      // Allow admin to bypass these checks
+      if (!user.isAdmin) {
+          if (user.credits < item.cost) return;
+          if (user.level < item.minLevel) return;
+      }
+      
       if (user.inventory?.includes(item.id)) return;
 
       const success = await spendCredits(item.cost, item.id);
@@ -39,8 +43,9 @@ const Shop: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
           {SHOP_ITEMS.map(item => {
               const isOwned = user.inventory?.includes(item.id);
-              const isLocked = user.level < item.minLevel;
-              const canAfford = user.credits >= item.cost;
+              const isLevelLocked = user.level < item.minLevel;
+              const isLocked = isLevelLocked && !user.isAdmin; // Unlock for admin
+              const canAfford = user.credits >= item.cost || user.isAdmin;
               const Icon = item.icon;
 
               return (
@@ -61,21 +66,25 @@ const Shop: React.FC = () => {
                           <p className="text-gray-400 text-sm mb-6 flex-grow">{item.description}</p>
                           
                           <div className="mt-auto">
-                              {isLocked ? (
-                                  <div className="bg-black/40 py-3 rounded-lg flex items-center justify-center gap-2 text-gray-500 font-bold text-sm">
-                                      <Lock size={16}/> Desbloquea en Nivel {item.minLevel}
-                                  </div>
-                              ) : isOwned ? (
+                              {isOwned ? (
                                   <button disabled className="w-full bg-green-900/30 text-green-400 py-3 rounded-lg font-bold cursor-default">
                                       Comprado
                                   </button>
+                              ) : isLocked ? (
+                                  <div className="bg-black/40 py-3 rounded-lg flex items-center justify-center gap-2 text-gray-500 font-bold text-sm">
+                                      <Lock size={16}/> Desbloquea en Nivel {item.minLevel}
+                                  </div>
                               ) : (
                                   <button 
                                     onClick={() => handlePurchase(item)}
                                     disabled={!canAfford}
-                                    className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors ${canAfford ? 'bg-cine-gold text-black hover:bg-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+                                    className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors ${canAfford ? (user.isAdmin && (user.credits < item.cost || isLevelLocked) ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-cine-gold text-black hover:bg-white') : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
                                   >
-                                      <Ticket size={18}/> {item.cost}
+                                      {user.isAdmin && (user.credits < item.cost || isLevelLocked) ? (
+                                          <><Shield size={18}/> ACTIVAR (ADMIN)</>
+                                      ) : (
+                                          <><Ticket size={18}/> {item.cost}</>
+                                      )}
                                   </button>
                               )}
                           </div>

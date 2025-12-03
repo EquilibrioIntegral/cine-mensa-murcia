@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState } from 'react';
 import { generateCareerStory } from '../services/geminiService';
 import { MilestoneEvent } from '../types';
@@ -7,6 +6,7 @@ import { Trophy, Loader2, PlayCircle, Star, Gamepad2, ArrowRight } from 'lucide-
 import RankBadge from './RankBadge';
 import { ViewState } from '../types';
 import { useData } from '../context/DataContext';
+import { RANKS } from '../constants';
 
 interface CareerMilestoneModalProps {
     event: MilestoneEvent;
@@ -19,6 +19,8 @@ const CareerMilestoneModal: React.FC<CareerMilestoneModalProps> = ({ event, user
     const { setView } = useData();
     const [storyData, setStoryData] = useState<{ story: string, visualPrompt: string } | null>(null);
     const [loading, setLoading] = useState(true);
+
+    const isRankUp = RANKS.some(r => r.minLevel === event.level);
 
     // If it's just a "Challenge Ready" notification, we don't need AI story generation necessarily, 
     // but we can generate a "Call to Adventure" text.
@@ -36,7 +38,9 @@ const CareerMilestoneModal: React.FC<CareerMilestoneModalProps> = ({ event, user
                     const result = await generateCareerStory(
                         userName, 
                         event.rankTitle, 
-                        event.type === 'welcome'
+                        event.type === 'welcome',
+                        event.level,
+                        isRankUp
                     );
                     setStoryData(result);
                 }
@@ -50,7 +54,7 @@ const CareerMilestoneModal: React.FC<CareerMilestoneModalProps> = ({ event, user
         };
 
         fetchStory();
-    }, [event, userName]);
+    }, [event, userName, isRankUp]);
 
     const imageUrl = storyData 
         ? `https://image.pollinations.ai/prompt/${encodeURIComponent(storyData.visualPrompt)}?nologo=true&width=800&height=600&model=flux`
@@ -92,7 +96,7 @@ const CareerMilestoneModal: React.FC<CareerMilestoneModalProps> = ({ event, user
                                 <h2 className="text-4xl font-black text-white drop-shadow-[0_4px_0_#000] uppercase italic tracking-tighter leading-none">
                                     {event.type === 'welcome' ? '¡Luces, Cámara, Acción!' : 
                                      event.type === 'challenge_ready' ? '¡Ascenso Disponible!' : 
-                                     '¡Nuevo Rango Alcanzado!'}
+                                     isRankUp ? '¡Nuevo Rango Alcanzado!' : '¡Nuevo Nivel Alcanzado!'}
                                 </h2>
                             </div>
                         </div>
@@ -126,7 +130,7 @@ const CareerMilestoneModal: React.FC<CareerMilestoneModalProps> = ({ event, user
                                     {event.type === 'welcome' ? (
                                         <> <PlayCircle size={24} fill="black" className="text-cine-gold"/> Iniciar mi Carrera </>
                                     ) : (
-                                        <> <Trophy size={24} fill="black" className="text-cine-gold"/> Ver mis Nuevos Privilegios </>
+                                        <> <Trophy size={24} fill="black" className="text-cine-gold"/> Continuar </>
                                     )}
                                 </button>
                             )}
