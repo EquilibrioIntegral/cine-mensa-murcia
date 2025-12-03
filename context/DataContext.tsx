@@ -162,7 +162,8 @@ interface DataContextType {
   startPrivateChat: (targetUserId: string) => Promise<void>;
   closePrivateChat: () => Promise<void>;
   leavePrivateChat: () => Promise<void>;
-  sendPrivateMessage: (text: string) => Promise<void>;
+  sendPrivateMessage: (text: string, type?: 'text' | 'system') => Promise<void>;
+  setPrivateChatTyping: (isTyping: boolean) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -267,23 +268,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               
               // Only trigger if we aren't already in it or it changed
               setActivePrivateChat(prev => {
-                  if (prev && prev.session.id === sessionData.id) return prev;
+                  if (prev && prev.session.id === sessionData.id) {
+                      // Update session data (e.g. typing status changed)
+                      return { ...prev, session: sessionData };
+                  }
                   return { session: sessionData, messages: [] };
               });
 
-              // Sub-listener for messages
-              const qMsg = query(collection(db, `private_chats/${relevantChat.id}/messages`), orderBy('timestamp', 'asc'));
-              const unsubMsg = onSnapshot(qMsg, (msgSnap) => {
-                  const msgs = msgSnap.docs.map(d => ({ ...d.data(), id: d.id } as PrivateChatMessage));
-                  setActivePrivateChat(prev => {
-                      if (!prev) return null; // Should not happen if logic is sound
-                      return { ...prev, session: sessionData, messages: msgs };
-                  });
-              });
-              
-              // We don't unsubscribe from msg here easily because of re-renders, 
-              // but activePrivateChat state change handles view.
-              // A proper cleanup would require a ref to hold unsub function.
+              // Sub-listener for messages if this is a NEW chat session load
+              // NOTE: In a real optimized app, we would manage the message listener separately to avoid re-subscribing on every session update (typing)
+              // But for this scale, we can just ensure we only subscribe when the ID changes.
+              // To do that properly, we should move the message listener to a separate useEffect or verify ID.
           } else {
               setActivePrivateChat(null);
           }
@@ -291,6 +286,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return () => unsubChat();
   }, [user?.id]); // Re-run if user changes
+
+  // SEPARATE EFFECT FOR MESSAGES TO AVOID FLICKER ON TYPING UPDATES
+  useEffect(() => {
+      if (activePrivateChat?.session.id) {
+          const chatId = activePrivateChat.session.id;
+          const qMsg = query(collection(db, `private_chats/${chatId}/messages`), orderBy('timestamp', 'asc'));
+          const unsubMsg = onSnapshot(qMsg, (msgSnap) => {
+              const msgs = msgSnap.docs.map(d => ({ ...d.data(), id: d.id } as PrivateChatMessage));
+              setActivePrivateChat(prev => {
+                  if (!prev || prev.session.id !== chatId) return prev;
+                  return { ...prev, messages: msgs };
+              });
+          });
+          return () => unsubMsg();
+      }
+  }, [activePrivateChat?.session.id]);
 
   // AUTOMATIC NEWS GENERATION TRIGGER
   useEffect(() => {
@@ -976,7 +987,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           creatorName: user.name,
           targetName: targetUser.name,
           isActive: true,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          typing: {}
       };
 
       try {
@@ -989,28 +1001,49 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const closePrivateChat = async () => {
       if (!activePrivateChat) return;
       try {
-          await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), { isActive: false });
-          setActivePrivateChat(null);
+          // 1. Send system message
+          await sendPrivateMessage("La sala ha sido cerrada por el anfitrión.", 'system');
+          
+          // 2. Wait a moment for UI to update then disable
+          setTimeout(async () => {
+              await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), { isActive: false });
+              setActivePrivateChat(null);
+          }, 500);
       } catch(e) { console.error("Error closing chat", e); }
   };
 
   const leavePrivateChat = async () => {
-      // Just clear local state, don't delete doc (only creator can close)
-      setActivePrivateChat(null);
+      if (!user || !activePrivateChat) return;
+      try {
+          // 1. Send system message
+          await sendPrivateMessage(`${user.name} ha abandonado la sala.`, 'system');
+          // 2. Just clear local state, don't delete doc (only creator can close)
+          setActivePrivateChat(null);
+      } catch(e) { console.error("Error leaving chat", e); }
   };
 
-  const sendPrivateMessage = async (text: string) => {
+  const sendPrivateMessage = async (text: string, type: 'text' | 'system' = 'text') => {
       if (!user || !activePrivateChat) return;
       const msg: PrivateChatMessage = {
           id: `msg_${Date.now()}`,
           senderId: user.id,
           senderName: user.name,
           text: text,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          type: type
       };
       try {
           await addDoc(collection(db, `private_chats/${activePrivateChat.session.id}/messages`), msg);
       } catch (e) { console.error("Error sending private msg", e); }
+  };
+
+  const setPrivateChatTyping = async (isTyping: boolean) => {
+      if (!user || !activePrivateChat) return;
+      try {
+          await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), {
+              [`typing.${user.id}`]: isTyping
+          });
+      } catch (e) { console.error("Error setting typing status", e); }
   };
 
   // --- ACTIONS ---
@@ -1159,7 +1192,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

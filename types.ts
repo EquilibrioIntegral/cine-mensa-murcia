@@ -251,6 +251,7 @@ export interface PrivateChatMessage {
     senderName: string;
     text: string;
     timestamp: number;
+    type?: 'text' | 'system'; // New field for system messages
 }
 
 export interface PrivateChatSession {
@@ -261,4 +262,5 @@ export interface PrivateChatSession {
     targetName: string;
     isActive: boolean;
     createdAt: number;
+    typing?: Record<string, boolean>; // Map of userId -> isTyping
 }
