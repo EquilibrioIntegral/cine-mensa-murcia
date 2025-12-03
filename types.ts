@@ -38,8 +38,9 @@ export interface User {
   completedMissions: string[]; // IDs of completed missions
   inventory?: string[]; // IDs of items owned
   hasSeenWelcome?: boolean; // Flag for the Career Intro Modal
-  gamificationStats?: Record<string, boolean>; // Tracks actions like "visit_ranking", "search_used", "feedback_sent"
-  lastGamificationReset?: number; // Timestamp for gamification reset
+  gamificationStats?: Record<string, any>; // Tracks actions (booleans or counters)
+  lastGamificationReset?: number; // Admin hard reset timestamp
+  lastLevelUpTimestamp?: number; // Timestamp of when the current level was reached
   lastSeen?: number; // Timestamp for online status
 }
 

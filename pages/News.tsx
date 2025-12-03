@@ -1,5 +1,6 @@
 
 
+
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState, NewsItem } from '../types';
@@ -9,9 +10,18 @@ import { RANKS } from '../constants';
 import OnlineUsersWidget from '../components/OnlineUsersWidget';
 
 const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
+    const { triggerAction } = useData();
     const [isExpanded, setIsExpanded] = useState(false);
     // Determine if content is long enough to need expansion
     const contentPreview = item.content.length > 200 && !isExpanded;
+
+    const handleExpand = () => {
+        const nextState = !isExpanded;
+        setIsExpanded(nextState);
+        if (nextState) {
+            triggerAction('read_news');
+        }
+    }
 
     return (
         <div className="hover:bg-white/5 transition-colors group">
@@ -38,7 +48,7 @@ const NewsCard: React.FC<{ item: NewsItem }> = ({ item }) => {
                 
                 {item.content.length > 200 && (
                     <button 
-                        onClick={() => setIsExpanded(!isExpanded)}
+                        onClick={handleExpand}
                         className="mt-3 text-sm text-cine-gold font-bold flex items-center gap-1 hover:text-white transition-colors"
                     >
                         {isExpanded ? (

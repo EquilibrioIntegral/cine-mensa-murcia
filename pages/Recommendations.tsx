@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieRecommendations, sendChatToGemini } from '../services/geminiService';
@@ -85,7 +87,7 @@ const Recommendations: React.FC = () => {
           const response = await sendChatToGemini(chatHistory, newUserMsg.text, watched, watchlist, userRatings, tmdbToken);
           setChatHistory(prev => [...prev, { role: 'model', text: response.text, relatedMovies: response.movies }]);
           if (voiceEnabledLegacy) speakTextLegacy(response.text);
-          triggerAction('use_ai');
+          triggerAction('use_ai_chat'); // NEW TRIGGER FOR ADVANCED CHAT MISSION
       } catch (error) { setChatHistory(prev => [...prev, { role: 'model', text: "Error de comunicación." }]); } finally { setChatLoading(false); }
   };
 
@@ -159,7 +161,7 @@ const Recommendations: React.FC = () => {
                           </div>
 
                           <button 
-                            onClick={() => { startLiveSession('general'); triggerAction('use_ai'); }}
+                            onClick={() => { startLiveSession('general'); triggerAction('use_ai_chat'); }}
                             disabled={remainingSeconds <= 0 && !user?.isAdmin}
                             className="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-10 rounded-full text-lg shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all transform hover:scale-105 flex items-center gap-3 disabled:opacity-50 disabled:grayscale"
                           >
