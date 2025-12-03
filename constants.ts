@@ -370,6 +370,7 @@ export const MISSIONS: Mission[] = [
         description: 'Valora 5 películas NUEVAS desde que subiste a nivel 2.',
         xpReward: 25,
         icon: Star,
+        minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.ratingsCount >= 5
     },
     {
@@ -379,6 +380,7 @@ export const MISSIONS: Mission[] = [
         description: 'Escribe reseñas para 5 películas nuevas.',
         xpReward: 30,
         icon: PenTool,
+        minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.reviewsCount >= 5
     },
     {
@@ -388,6 +390,7 @@ export const MISSIONS: Mission[] = [
         description: 'Lee una noticia completa (expandir leer más).',
         xpReward: 10,
         icon: Newspaper,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['read_news']
     },
     {
@@ -397,6 +400,7 @@ export const MISSIONS: Mission[] = [
         description: 'Usa el chat avanzado o de voz con la IA.',
         xpReward: 15,
         icon: Bot,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['use_ai_chat']
     },
     {
@@ -406,6 +410,7 @@ export const MISSIONS: Mission[] = [
         description: 'Da Like o Dislike a 5 reseñas de otros usuarios.',
         xpReward: 20,
         icon: ThumbsUp,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['social_interactions'] || 0) >= 5
     },
     {
@@ -415,6 +420,7 @@ export const MISSIONS: Mission[] = [
         description: 'Vota por una película candidata en el Cineforum.',
         xpReward: 15,
         icon: Ticket,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['vote_event']
     },
     {
@@ -424,6 +430,7 @@ export const MISSIONS: Mission[] = [
         description: 'Envía 5 reportes de bug o ideas de mejora.',
         xpReward: 25,
         icon: Bug,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['feedback_count'] || 0) >= 5
     },
     {
@@ -433,6 +440,7 @@ export const MISSIONS: Mission[] = [
         description: 'Ten al menos 5 películas en tu lista de pendientes.',
         xpReward: 10,
         icon: ListVideo,
+        minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && user.watchlist.length >= 5
     }
 ];

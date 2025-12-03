@@ -213,6 +213,7 @@ export interface Mission {
   description: string;
   xpReward: number;
   icon: any; // Lucide Icon component name or similar
+  minLevel?: number; // Optional: Only unlocks at this level within the rank
   condition: (user: User, stats: { 
     ratingsCount: number, 
     reviewsCount: number, 

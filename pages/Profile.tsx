@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import AvatarSelector from '../components/AvatarSelector';
@@ -178,7 +179,7 @@ const Profile: React.FC = () => {
                                     <div key={idx} className="border-b border-gray-800 pb-3 last:border-0">
                                         <div className="flex justify-between mb-1">
                                             <span className="text-cine-gold font-bold">{r.rating.toFixed(1)} <span className="text-xs text-gray-500">/ 10</span></span>
-                                            <span className="text-xs text-gray-500">{new Date(r.timestamp).toLocaleDateString()}</span>
+                                            <span className="text-xs text-gray-500">{new Date(r.timestamp).toLocaleDateString()}</p>
                                         </div>
                                         <p className="text-gray-300 text-sm line-clamp-2">"{r.comment}"</p>
                                     </div>
@@ -283,8 +284,29 @@ const Profile: React.FC = () => {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                 {rankMissions.map(mission => {
                                                     const isCompleted = user.completedMissions?.includes(mission.id);
+                                                    // New Logic: Locked if user level is lower than mission requirement, even if rank is unlocked
+                                                    const isLevelLocked = mission.minLevel && currentLevel < mission.minLevel;
                                                     const Icon = mission.icon;
                                                     
+                                                    // Locked Visuals
+                                                    if (isLevelLocked) {
+                                                        return (
+                                                            <div key={mission.id} className="p-3 rounded-lg border border-gray-800 bg-black/20 flex items-center gap-3 opacity-60 grayscale relative overflow-hidden group">
+                                                                <div className="p-2 rounded-full bg-black/50 text-gray-600">
+                                                                    <Lock size={18} />
+                                                                </div>
+                                                                <div className="flex-grow">
+                                                                    <h5 className="text-sm font-bold text-gray-500">{mission.title}</h5>
+                                                                    <p className="text-xs text-gray-600">Desbloquea en Nivel {mission.minLevel}</p>
+                                                                </div>
+                                                                {/* Tooltip on Hover */}
+                                                                <div className="absolute inset-0 bg-black/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    <span className="text-xs font-bold text-cine-gold">Necesitas Nivel {mission.minLevel}</span>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    }
+
                                                     return (
                                                         <div 
                                                             key={mission.id} 

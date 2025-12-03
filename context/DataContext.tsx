@@ -1,4 +1,5 @@
 
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
 import { auth, db } from '../firebase';
@@ -232,11 +233,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubRatings = onSnapshot(collection(db, 'ratings'), (snap) => {
           setUserRatings(snap.docs.map(d => d.data() as UserRating));
       });
+      // CRITICAL FIX: Ensure ID is included in News and Feedback items from addDoc
       const unsubNews = onSnapshot(query(collection(db, 'news'), orderBy('timestamp', 'desc')), (snap) => {
-          setNews(snap.docs.map(d => d.data() as NewsItem));
+          setNews(snap.docs.map(d => ({ ...d.data(), id: d.id } as NewsItem)));
       });
       const unsubFeedback = onSnapshot(collection(db, 'feedback'), (snap) => {
-          setFeedbackList(snap.docs.map(d => d.data() as AppFeedback));
+          setFeedbackList(snap.docs.map(d => ({ ...d.data(), id: d.id } as AppFeedback)));
       });
       
       // Active Event
@@ -342,7 +344,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // --- GAMIFICATION ENGINE ---
-  // Updated: Filter actions by lastLevelUpTimestamp
+  // Updated: Filter actions by lastLevelUpTimestamp for relative progression
   const checkAchievements = async (currentUser: User) => {
       if (!currentUser) return;
       
@@ -354,29 +356,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const filterTimestamp = Math.max(adminResetDate, levelStartTime);
 
       // Filter ratings/reviews that happened AFTER the last level up
-      const myRatings = userRatings.filter(r => r.userId === currentUser.id && r.timestamp > filterTimestamp);
+      const myRatingsRelative = userRatings.filter(r => r.userId === currentUser.id && r.timestamp > filterTimestamp);
       
       const stats = {
-          ratingsCount: myRatings.length,
-          reviewsCount: myRatings.filter(r => r.comment && r.comment.length > 5).length,
-          likesReceived: myRatings.reduce((acc, r) => acc + (r.likes?.length || 0), 0),
-          horrorCount: myRatings.filter(r => {
+          ratingsCount: myRatingsRelative.length,
+          reviewsCount: myRatingsRelative.filter(r => r.comment && r.comment.length > 5).length,
+          likesReceived: myRatingsRelative.reduce((acc, r) => acc + (r.likes?.length || 0), 0),
+          horrorCount: myRatingsRelative.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => g.toLowerCase().includes('terror') || g.toLowerCase().includes('horror'));
           }).length,
-          actionCount: myRatings.filter(r => {
+          actionCount: myRatingsRelative.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => { const gl = g.toLowerCase(); return gl.includes('acción') || gl.includes('action') || gl.includes('aventura'); });
           }).length,
-          comedyCount: myRatings.filter(r => {
+          comedyCount: myRatingsRelative.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => g.toLowerCase().includes('comedia') || g.toLowerCase().includes('comedy'));
           }).length,
-          dramaCount: myRatings.filter(r => {
+          dramaCount: myRatingsRelative.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => g.toLowerCase().includes('drama'));
           }).length,
-          scifiCount: myRatings.filter(r => {
+          scifiCount: myRatingsRelative.filter(r => {
               const m = movies.find(mov => mov.id === r.movieId);
               return m && m.genre.some(g => g.toLowerCase().includes('ciencia ficción') || g.toLowerCase().includes('sci-fi'));
           }).length

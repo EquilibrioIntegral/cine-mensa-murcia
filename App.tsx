@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -17,12 +18,39 @@ import Shop from './pages/Shop';
 import Arcade from './pages/Arcade';
 import CareerMilestoneModal from './components/CareerMilestoneModal';
 import { ViewState } from './types';
+import { Clock, LogOut } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab } = useData();
+  const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab, logout } = useData();
 
   if (!user) {
     return <Login />;
+  }
+
+  // --- NEW: BLOCK PENDING USERS ---
+  if (user.status === 'pending') {
+      return (
+          <div className="min-h-screen bg-cine-dark flex items-center justify-center p-4">
+              <div className="bg-cine-gray p-8 rounded-2xl border border-gray-700 shadow-2xl max-w-md text-center">
+                  <div className="w-20 h-20 bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <Clock size={48} className="text-yellow-500 animate-pulse" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white mb-2">Solicitud en Revisión</h2>
+                  <p className="text-gray-400 mb-8 leading-relaxed">
+                      Gracias por registrarte, <span className="text-cine-gold font-bold">{user.name}</span>. 
+                      <br/><br/>
+                      Tu solicitud está siendo revisada por la administración del club. 
+                      Recibirás acceso completo una vez aprobada.
+                  </p>
+                  <button 
+                      onClick={logout}
+                      className="bg-red-900/50 hover:bg-red-900 text-red-200 px-6 py-3 rounded-lg font-bold flex items-center justify-center gap-2 mx-auto transition-colors"
+                  >
+                      <LogOut size={18}/> Cerrar Sesión
+                  </button>
+              </div>
+          </div>
+      );
   }
 
   const handleMilestoneAction = () => {
