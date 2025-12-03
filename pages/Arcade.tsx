@@ -55,86 +55,86 @@ const Arcade: React.FC = () => {
           />
       )}
 
-      <div className="text-center mb-12">
-          <h2 className="text-4xl font-black text-white mb-2 flex items-center justify-center gap-3 uppercase tracking-wider">
-              <span className="text-cine-gold text-5xl">Cartelera</span> de Retos
+      <div className="text-center mb-8 md:mb-12">
+          <h2 className="text-3xl md:text-4xl font-black text-white mb-2 flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 uppercase tracking-wider">
+              <span className="text-cine-gold text-4xl md:text-5xl">Cartelera</span> de Retos
           </h2>
-          <p className="text-gray-400 max-w-lg mx-auto font-serif italic text-lg">
-              "Cada nivel es una película donde tú eres el protagonista. <br/>Completa el estreno para ascender."
+          <p className="text-gray-400 max-w-lg mx-auto font-serif italic text-sm md:text-lg px-4">
+              "Cada nivel es una película donde tú eres el protagonista. <br className="hidden md:block"/>Completa el estreno para ascender."
           </p>
       </div>
 
       {/* CHALLENGE MODAL (Premiere View) */}
       {selectedChallenge && !isPlaying && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-fade-in">
-              <div className="max-w-4xl w-full bg-cine-dark rounded-2xl border border-cine-gold/30 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col md:flex-row relative">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-fade-in overflow-y-auto">
+              <div className="max-w-4xl w-full bg-cine-dark rounded-2xl border border-cine-gold/30 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col md:flex-row relative my-auto">
                   
                   <button 
                     onClick={() => setSelectedChallenge(null)}
-                    className="absolute top-4 right-4 z-50 bg-black/50 text-white p-2 rounded-full hover:bg-white hover:text-black transition-colors"
+                    className="absolute top-3 right-3 z-50 bg-black/50 text-white p-2 rounded-full hover:bg-white hover:text-black transition-colors"
                   >
-                      <X size={24}/>
+                      <X size={20}/>
                   </button>
 
                   {/* LEFT: POSTER */}
-                  <div className="w-full md:w-2/5 relative h-64 md:h-auto">
+                  <div className="w-full md:w-2/5 relative h-48 md:h-auto flex-shrink-0">
                       <img 
                         src={`https://image.pollinations.ai/prompt/${encodeURIComponent(selectedChallenge.imagePrompt)}?nologo=true&width=600&height=900&model=flux`} 
                         alt={selectedChallenge.title}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover object-center"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-cine-dark via-transparent to-transparent md:bg-gradient-to-r"></div>
                   </div>
 
                   {/* RIGHT: INFO */}
-                  <div className="w-full md:w-3/5 p-8 flex flex-col relative">
+                  <div className="w-full md:w-3/5 p-5 md:p-8 flex flex-col relative">
                       {/* Background decor */}
-                      <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                      <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none hidden md:block">
                           <Ticket size={120} className="text-cine-gold" />
                       </div>
 
                       <div className="mb-1">
-                          <span className="text-cine-gold font-bold uppercase tracking-widest text-xs">Estreno Exclusivo</span>
+                          <span className="text-cine-gold font-bold uppercase tracking-widest text-[10px] md:text-xs">Estreno Exclusivo</span>
                       </div>
                       
-                      <h2 className="text-3xl md:text-4xl font-black text-white mb-2 uppercase leading-none font-serif">
+                      <h2 className="text-2xl md:text-4xl font-black text-white mb-2 uppercase leading-none font-serif">
                           {selectedChallenge.title}
                       </h2>
                       
-                      <div className="flex items-center gap-4 mb-6 text-sm text-gray-400">
+                      <div className="flex flex-wrap items-center gap-3 md:gap-4 mb-4 md:mb-6 text-xs md:text-sm text-gray-400">
                           <span className="bg-gray-800 px-2 py-1 rounded text-white font-bold">Nivel {selectedChallenge.level}</span>
-                          <span className="flex items-center gap-1"><Star size={14} className="text-cine-gold"/> Puntuación mín: <span className="text-white font-bold">{selectedChallenge.passingScore}/20</span></span>
-                          <span className="uppercase">{selectedChallenge.type === 'boss' ? 'Jefe Final' : 'Trivial Cine'}</span>
+                          <span className="flex items-center gap-1"><Star size={14} className="text-cine-gold"/> Mín: <span className="text-white font-bold">{selectedChallenge.passingScore}/20</span></span>
+                          <span className="uppercase bg-black/40 px-2 py-1 rounded border border-gray-700">{selectedChallenge.type === 'boss' ? 'Jefe Final' : 'Trivial'}</span>
                       </div>
 
-                      <div className="mb-6 relative">
-                          <p className="text-gray-300 italic leading-relaxed text-lg border-l-4 border-cine-gold pl-4">
+                      <div className="mb-6 relative flex-grow">
+                          <p className="text-gray-300 italic leading-relaxed text-sm md:text-lg border-l-4 border-cine-gold pl-4">
                               "{selectedChallenge.synopsis}"
                           </p>
                       </div>
 
-                      <div className="mt-auto space-y-4">
-                          <div className="flex items-center gap-4 bg-black/40 p-4 rounded-xl border border-gray-800">
-                              <div className="p-3 bg-green-900/20 rounded-full text-green-500">
-                                  <Ticket size={24} />
+                      <div className="mt-auto space-y-3 md:space-y-4">
+                          <div className="flex items-center gap-3 md:gap-4 bg-black/40 p-3 md:p-4 rounded-xl border border-gray-800">
+                              <div className="p-2 md:p-3 bg-green-900/20 rounded-full text-green-500">
+                                  <Ticket size={20} />
                               </div>
                               <div>
-                                  <p className="text-xs text-gray-500 uppercase font-bold">Recompensa (Solo 1ª Vez)</p>
-                                  <p className="text-xl font-bold text-white">{selectedChallenge.rewardCredits} Créditos</p>
+                                  <p className="text-[10px] md:text-xs text-gray-500 uppercase font-bold">Recompensa (Solo 1ª Vez)</p>
+                                  <p className="text-lg md:text-xl font-bold text-white">{selectedChallenge.rewardCredits} Créditos</p>
                               </div>
                           </div>
 
                           <button 
                               onClick={handleStartGame}
-                              className="w-full bg-cine-gold hover:bg-white text-black font-black text-xl py-4 rounded-xl shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.02] transition-all flex items-center justify-center gap-3 uppercase tracking-wide"
+                              className="w-full bg-cine-gold hover:bg-white text-black font-black text-lg md:text-xl py-3 md:py-4 rounded-xl shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.02] transition-all flex items-center justify-center gap-2 md:gap-3 uppercase tracking-wide"
                           >
-                              <Play size={24} fill="black" />
+                              <Play size={20} fill="black" />
                               Comenzar Función
                           </button>
                           
                           {currentLevel >= selectedChallenge.level && (
-                              <p className="text-center text-xs text-gray-500 font-bold">
-                                  * Ya has completado este nivel. Jugarás en modo repetición (sin recompensas).
+                              <p className="text-center text-[10px] md:text-xs text-gray-500 font-bold">
+                                  * Ya has completado este nivel. Jugarás en modo repetición.
                               </p>
                           )}
                       </div>
@@ -144,7 +144,7 @@ const Arcade: React.FC = () => {
       )}
 
       {/* POSTER GRID */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
           {LEVEL_CHALLENGES.map((challenge, index) => {
               const isCompleted = currentLevel >= challenge.level;
               const isNext = currentLevel === challenge.level - 1;

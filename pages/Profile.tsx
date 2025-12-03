@@ -85,7 +85,7 @@ const Profile: React.FC = () => {
         </div>
 
         {activeTab === 'profile' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 animate-fade-in">
                 
                 {/* Left: Card Profile */}
                 <div className="bg-cine-gray rounded-xl border border-gray-700 overflow-hidden shadow-2xl h-fit">
@@ -136,33 +136,33 @@ const Profile: React.FC = () => {
 
                 {/* Right: Stats */}
                 <div className="md:col-span-2 space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-black/40 p-6 rounded-xl border border-gray-800 flex items-center gap-4">
-                            <div className="p-3 bg-blue-900/30 rounded-full text-blue-400"><Film size={24}/></div>
-                            <div>
-                                <p className="text-2xl font-bold text-white">{user.watchedMovies.length}</p>
-                                <p className="text-sm text-gray-500">Películas Vistas</p>
+                    <div className="grid grid-cols-2 gap-3 md:gap-4">
+                        <div className="bg-black/40 p-4 md:p-6 rounded-xl border border-gray-800 flex items-center gap-3 md:gap-4">
+                            <div className="p-2 md:p-3 bg-blue-900/30 rounded-full text-blue-400 flex-shrink-0"><Film size={20}/></div>
+                            <div className="min-w-0">
+                                <p className="text-xl md:text-2xl font-bold text-white truncate">{user.watchedMovies.length}</p>
+                                <p className="text-xs md:text-sm text-gray-500 truncate">Vistas</p>
                             </div>
                         </div>
-                        <div className="bg-black/40 p-6 rounded-xl border border-gray-800 flex items-center gap-4">
-                            <div className="p-3 bg-purple-900/30 rounded-full text-purple-400"><MessageSquare size={24}/></div>
-                            <div>
-                                <p className="text-2xl font-bold text-white">{totalReviews}</p>
-                                <p className="text-sm text-gray-500">Reseñas</p>
+                        <div className="bg-black/40 p-4 md:p-6 rounded-xl border border-gray-800 flex items-center gap-3 md:gap-4">
+                            <div className="p-2 md:p-3 bg-purple-900/30 rounded-full text-purple-400 flex-shrink-0"><MessageSquare size={20}/></div>
+                            <div className="min-w-0">
+                                <p className="text-xl md:text-2xl font-bold text-white truncate">{totalReviews}</p>
+                                <p className="text-xs md:text-sm text-gray-500 truncate">Reseñas</p>
                             </div>
                         </div>
-                        <div className="bg-black/40 p-6 rounded-xl border border-gray-800 flex items-center gap-4">
-                            <div className="p-3 bg-yellow-900/30 rounded-full text-yellow-400"><Star size={24}/></div>
-                            <div>
-                                <p className="text-2xl font-bold text-white">{avgGiven}</p>
-                                <p className="text-sm text-gray-500">Nota Media Dada</p>
+                        <div className="bg-black/40 p-4 md:p-6 rounded-xl border border-gray-800 flex items-center gap-3 md:gap-4">
+                            <div className="p-2 md:p-3 bg-yellow-900/30 rounded-full text-yellow-400 flex-shrink-0"><Star size={20}/></div>
+                            <div className="min-w-0">
+                                <p className="text-xl md:text-2xl font-bold text-white truncate">{avgGiven}</p>
+                                <p className="text-xs md:text-sm text-gray-500 truncate">Media Dada</p>
                             </div>
                         </div>
-                        <div className="bg-black/40 p-6 rounded-xl border border-gray-800 flex items-center gap-4">
-                            <div className="p-3 bg-green-900/30 rounded-full text-green-400"><ThumbsUp size={24}/></div>
-                            <div>
-                                <p className="text-2xl font-bold text-white">{totalLikes}</p>
-                                <p className="text-sm text-gray-500">Likes Recibidos</p>
+                        <div className="bg-black/40 p-4 md:p-6 rounded-xl border border-gray-800 flex items-center gap-3 md:gap-4">
+                            <div className="p-2 md:p-3 bg-green-900/30 rounded-full text-green-400 flex-shrink-0"><ThumbsUp size={20}/></div>
+                            <div className="min-w-0">
+                                <p className="text-xl md:text-2xl font-bold text-white truncate">{totalLikes}</p>
+                                <p className="text-xs md:text-sm text-gray-500 truncate">Likes</p>
                             </div>
                         </div>
                     </div>

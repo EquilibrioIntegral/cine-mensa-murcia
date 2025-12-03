@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
 import { auth, db } from '../firebase';
@@ -123,6 +124,7 @@ interface DataContextType {
   sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
   resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
   publishNews: (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => Promise<void>;
+  deleteNews: (id: string) => Promise<void>;
   deleteFeedback: (id: string) => Promise<void>;
   
   getEpisodeCount: () => Promise<number>;
@@ -143,6 +145,7 @@ interface DataContextType {
 
   // Admin Tools
   resetGamification: () => Promise<void>;
+  resetAutomation: () => Promise<void>;
   
   // Trigger Action (for new missions)
   triggerAction: (action: string) => Promise<void>;
@@ -151,7 +154,7 @@ interface DataContextType {
   completeLevelUpChallenge: (nextLevel: number, rewardCredits: number) => Promise<void>;
   
   // Automation Status
-  automationStatus: { lastRun: number, dailyCount: number, nextRun: number };
+  automationStatus: { lastRun: number, dailyCount: number, nextRun: number, isGenerating: boolean };
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -175,7 +178,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [initialProfileTab, setInitialProfileTab] = useState<'profile' | 'career'>('profile');
 
   // Automation Status for Admin
-  const [automationStatus, setAutomationStatus] = useState({ lastRun: 0, dailyCount: 0, nextRun: 0 });
+  const [automationStatus, setAutomationStatus] = useState({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false });
 
   // Top Critic Calculation
   const [topCriticId, setTopCriticId] = useState<string | null>(null);
@@ -242,17 +245,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               
               let data: any;
 
-              // CRITICAL FIX: Ensure document exists. If not, create it.
+              // Ensure document exists
               if (!snap.exists()) {
-                  data = { lastRun: 0, dailyCount: 0, currentDate: todayStr, isGenerating: false };
+                  data = { lastRun: 0, dailyCount: 0, currentDate: todayStr, isGenerating: false, bannedTitles: [] };
                   await setDoc(configRef, data);
               } else {
                   data = snap.data();
-                  // 1. Reset if new day
+                  // Reset if new day
                   if (data.currentDate !== todayStr) {
-                      data = { ...data, dailyCount: 0, currentDate: todayStr, isGenerating: false };
-                      // Use setDoc to ensure we overwrite/clean state properly for the new day
-                      await setDoc(configRef, data);
+                      await updateDoc(configRef, { dailyCount: 0, currentDate: todayStr, isGenerating: false });
+                      data.dailyCount = 0; // Local logic update
                   }
               }
 
@@ -260,79 +262,92 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setAutomationStatus({ 
                   lastRun: data.lastRun, 
                   dailyCount: data.dailyCount,
-                  nextRun: data.lastRun + NEWS_INTERVAL_MS
+                  nextRun: data.lastRun + NEWS_INTERVAL_MS,
+                  isGenerating: data.isGenerating
               });
 
+              // CRITICAL LOCK CHECK:
+              // If lock is ON but old (>10 mins), break it.
+              const isStuck = data.isGenerating && (now - data.lastRun > 10 * 60 * 1000);
+
               // 2. Conditions check
-              // - Not currently generating
-              // - Daily limit not reached
-              // - Time interval passed
-              if (data.isGenerating) return;
+              if (data.isGenerating && !isStuck) return;
               if (data.dailyCount >= MAX_DAILY_NEWS) return;
-              if (now - data.lastRun < NEWS_INTERVAL_MS) return;
+              if (now - data.lastRun < NEWS_INTERVAL_MS && !isStuck) return;
 
               // 3. START GENERATION
-              // Lock it first (We are sure doc exists now)
               await updateDoc(configRef, { isGenerating: true });
+              setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
               
-              // Generate Logic
-              const existingTitles = news.map(n => n.title);
-              const generatedItems = await generateCinemaNews(existingTitles);
-              
-              if (generatedItems.length > 0) {
-                  const item = generatedItems[0]; // Take only the first one
-                  let finalImage = '';
+              try {
+                  // Generate Logic - MERGE Existing + Banned
+                  const existingTitles = news.map(n => n.title);
+                  const bannedTitles = data.bannedTitles || [];
+                  const fullExclusionList = [...existingTitles, ...bannedTitles];
+
+                  const generatedItems = await generateCinemaNews(fullExclusionList);
                   
-                  // Try to fetch real image
-                  if (item.searchQuery && tmdbToken) {
-                      try {
-                          const movieResults = await searchMoviesTMDB(item.searchQuery, tmdbToken);
-                          if (movieResults.length > 0) {
-                              finalImage = getImageUrl(movieResults[0].backdrop_path || movieResults[0].poster_path, 'original');
-                          } else {
-                              const personResults = await searchPersonTMDB(item.searchQuery, tmdbToken);
-                              if (personResults.length > 0) {
-                                  finalImage = getImageUrl(personResults[0].profile_path, 'original');
+                  if (generatedItems.length > 0) {
+                      const item = generatedItems[0]; // Take only the first one
+                      let finalImage = '';
+                      
+                      // IMPROVED IMAGE SEARCH LOGIC
+                      if (item.searchQuery && tmdbToken) {
+                          try {
+                              const movieResults = await searchMoviesTMDB(item.searchQuery, tmdbToken);
+                              // 1. Prioritize movies with BACKDROP (Landscape)
+                              const bestMovie = movieResults.find(m => m.backdrop_path) || movieResults.find(m => m.poster_path);
+                              
+                              if (bestMovie) {
+                                  finalImage = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
+                              } else {
+                                  // 2. Fallback to Person
+                                  const personResults = await searchPersonTMDB(item.searchQuery, tmdbToken);
+                                  const bestPerson = personResults.find(p => p.profile_path);
+                                  if (bestPerson) {
+                                      finalImage = getImageUrl(bestPerson.profile_path, 'original');
+                                  }
                               }
-                          }
-                      } catch (e) { console.error("Auto-news image fetch error", e); }
-                  }
-                  
-                  if (!finalImage) {
-                      finalImage = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400&model=flux`;
-                  }
+                          } catch (e) { console.error("Auto-news image fetch error", e); }
+                      }
+                      
+                      // Fallback to AI only if TMDB completely failed
+                      if (!finalImage) {
+                          finalImage = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400&model=flux`;
+                      }
 
-                  await addDoc(collection(db, 'news'), {
-                      title: item.title,
-                      content: item.content,
-                      type: 'general',
-                      imageUrl: finalImage,
-                      timestamp: Date.now()
-                  });
+                      await addDoc(collection(db, 'news'), {
+                          title: item.title,
+                          content: item.content,
+                          type: 'general',
+                          imageUrl: finalImage,
+                          timestamp: Date.now()
+                      });
 
-                  // 4. Update Config on Success
-                  await updateDoc(configRef, {
-                      lastRun: Date.now(),
-                      dailyCount: increment(1),
-                      isGenerating: false
-                  });
-                  
-                  // Update local state immediately
-                  setAutomationStatus({
-                      lastRun: Date.now(),
-                      dailyCount: data.dailyCount + 1,
-                      nextRun: Date.now() + NEWS_INTERVAL_MS
-                  });
-              } else {
-                  // If generation failed, just unlock
+                      // 4. Update Config on Success
+                      await updateDoc(configRef, {
+                          lastRun: Date.now(),
+                          dailyCount: increment(1),
+                          isGenerating: false
+                      });
+                  } else {
+                      // If generation failed (empty array returned due to duplicates/errors)
+                      // LOGIC CHANGE: Wait full interval. Prevents rapid retry loop.
+                      console.log("AutoNews: No new unique items found. Waiting full cycle.");
+                      await updateDoc(configRef, { 
+                          isGenerating: false,
+                          lastRun: Date.now() 
+                      });
+                  }
+              } catch (innerError) {
+                  console.error("News Generation Logic Error:", innerError);
+                  // Ensure we unlock on logic error
                   await updateDoc(configRef, { isGenerating: false });
               }
 
           } catch (e) {
-              console.error("Auto News Error:", e);
-              // Unlock on error if possible
+              console.error("Auto News Top Level Error:", e);
               try { 
-                  // Safe unlock attempt
                   const d = await getDoc(configRef);
                   if (d.exists()) {
                       await updateDoc(configRef, { isGenerating: false }); 
@@ -345,7 +360,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           checkAndGenerateAutoNews();
           automationCheckedRef.current = true;
       }
-  }, [user, tmdbToken, news]); // Dependencies ensure it runs when user enters and we have token/news data
+  }, [user, tmdbToken, news]); 
 
   // DATA SUBSCRIPTIONS
   useEffect(() => {
@@ -395,7 +410,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setAutomationStatus({
                   lastRun: d.lastRun,
                   dailyCount: isToday ? d.dailyCount : 0,
-                  nextRun: d.lastRun + NEWS_INTERVAL_MS
+                  nextRun: d.lastRun + NEWS_INTERVAL_MS,
+                  isGenerating: d.isGenerating
               });
           }
       });
@@ -666,6 +682,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           alert("¡RESET COMPLETADO!");
           setTimeout(() => window.location.reload(), 1000);
       } catch (e) { alert("Error: " + String(e)); }
+  };
+
+  const resetAutomation = async () => {
+      await setDoc(doc(db, 'config', 'news_automation'), {
+          lastRun: 0, // Reset timer so it runs immediately
+          dailyCount: 0,
+          currentDate: new Date().toLocaleDateString('es-ES'),
+          isGenerating: false,
+          bannedTitles: []
+      });
+      setAutomationStatus({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false }); // Update local
   };
 
   useEffect(() => {
@@ -966,10 +993,42 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resolveFeedback = async (feedbackId: string, response?: string) => { await updateDoc(doc(db, 'feedback', feedbackId), { status: 'solved', adminResponse: response }); const fb = feedbackList.find(f => f.id === feedbackId); if (fb) { await publishNews(fb.type === 'bug' ? '🐛 Bug Exterminado' : '✨ Nueva Funcionalidad', `Gracias al reporte de ${fb.userName}, hemos solucionado: "${fb.text}".`, 'update'); } };
   const deleteFeedback = async (id: string) => { await deleteDoc(doc(db, 'feedback', id)); };
   const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => { await addDoc(collection(db, 'news'), { title, content, type, imageUrl, timestamp: Date.now() }); };
+  
+  // NEW METHOD: Delete with Blacklist
+  const deleteNews = async (id: string) => { 
+      try {
+          // 1. Get the news item to find its title
+          const newsRef = doc(db, 'news', id);
+          const snap = await getDoc(newsRef);
+          
+          if (snap.exists()) {
+              const newsData = snap.data();
+              // 2. Add title to banned list in config
+              if (newsData.title) {
+                  const configRef = doc(db, 'config', 'news_automation');
+                  // Ensure config doc exists
+                  const configSnap = await getDoc(configRef);
+                  if (configSnap.exists()) {
+                      await updateDoc(configRef, {
+                          bannedTitles: arrayUnion(newsData.title)
+                      });
+                  } else {
+                      await setDoc(configRef, { bannedTitles: [newsData.title] }, { merge: true });
+                  }
+              }
+          }
+
+          // 3. Delete the news
+          await deleteDoc(newsRef); 
+      } catch (e) {
+          console.error("Error deleting news:", e);
+      }
+  };
+
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, triggerAction, completeLevelUpChallenge, automationStatus
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

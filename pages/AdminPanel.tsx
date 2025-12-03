@@ -1,12 +1,65 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw, FileText } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
+// Sub-component for individual news row with internal confirmation state
+const NewsItemRow: React.FC<{ item: any, onDelete: (id: string) => Promise<void> }> = ({ item, onDelete }) => {
+    const [confirming, setConfirming] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        if (confirming) {
+            setDeleting(true);
+            await onDelete(item.id);
+            setDeleting(false); // Component will unmount, but just in case
+        } else {
+            setConfirming(true);
+            // Reset confirmation timeout after 3 seconds
+            setTimeout(() => setConfirming(false), 3000);
+        }
+    };
+
+    return (
+        <div className="bg-black/30 p-3 rounded-lg border border-gray-700 flex justify-between items-start group hover:border-gray-500 transition-colors animate-fade-in">
+            <div className="mr-3 overflow-hidden">
+                <p className="font-bold text-white text-sm truncate">{item.title}</p>
+                <p className="text-xs text-gray-500">{new Date(item.timestamp).toLocaleDateString()} • {item.type}</p>
+            </div>
+            <button 
+                type="button"
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDelete();
+                }}
+                disabled={deleting}
+                className={`p-2 rounded-full transition-all flex items-center justify-center gap-1 flex-shrink-0 ${
+                    confirming 
+                    ? 'bg-red-600 text-white w-auto px-3 hover:bg-red-700 shadow-lg shadow-red-900/50' 
+                    : 'text-gray-500 hover:text-red-500 hover:bg-red-900/20'
+                }`}
+                title={confirming ? "Confirmar Borrado" : "Borrar Noticia"}
+            >
+                {deleting ? (
+                    <Loader2 size={18} className="animate-spin" />
+                ) : confirming ? (
+                    <>
+                        <Trash2 size={14} />
+                        <span className="text-xs font-bold whitespace-nowrap">¿Seguro?</span>
+                    </>
+                ) : (
+                    <Trash2 size={18} />
+                )}
+            </button>
+        </div>
+    );
+};
+
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, news, resetGamification, automationStatus } = useData();
+  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, deleteNews, news, resetGamification, resetAutomation, automationStatus } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -139,15 +192,17 @@ const AdminPanel: React.FC = () => {
           try {
               // Try movie first
               const movies = await searchMoviesTMDB(newsItem.searchQuery, tmdbToken);
-              if (movies.length > 0 && movies[0].backdrop_path) {
-                  realImage = getImageUrl(movies[0].backdrop_path, 'original');
-              } else if (movies.length > 0 && movies[0].poster_path) {
-                   realImage = getImageUrl(movies[0].poster_path, 'w500');
+              // Prioritize images with Backdrops
+              const bestMovie = movies.find(m => m.backdrop_path) || movies.find(m => m.poster_path);
+
+              if (bestMovie) {
+                  realImage = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
               } else {
                   // Try person
                   const people = await searchPersonTMDB(newsItem.searchQuery, tmdbToken);
-                  if (people.length > 0 && people[0].profile_path) {
-                      realImage = getImageUrl(people[0].profile_path, 'original');
+                  const bestPerson = people.find(p => p.profile_path);
+                  if (bestPerson) {
+                      realImage = getImageUrl(bestPerson.profile_path, 'original');
                   }
               }
           } catch (e) {
@@ -169,6 +224,14 @@ const AdminPanel: React.FC = () => {
       const confirm = window.confirm("¡PELIGRO! Esto borrará el XP, Nivel, Misiones y Créditos de TODOS los usuarios. ¿Estás seguro?");
       if (confirm) {
           await resetGamification();
+      }
+  }
+
+  const handleResetAutomation = async () => {
+      const confirm = window.confirm("¿Resetear el sistema de Noticias Automáticas? Se desbloqueará y se intentará publicar de nuevo en la próxima carga.");
+      if (confirm) {
+          await resetAutomation();
+          alert("Sistema reseteado. Recarga la página para forzar el trigger.");
       }
   }
 
@@ -351,6 +414,17 @@ const AdminPanel: React.FC = () => {
                       </button>
                       {newsSent && <p className="text-green-500 text-center font-bold">¡Publicado en portada!</p>}
                   </form>
+
+                  {/* MANAGE PUBLISHED NEWS */}
+                  <div className="mt-8 pt-8 border-t border-gray-800">
+                      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><FileText className="text-cine-gold"/> Gestionar Noticias Publicadas</h3>
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                          {news.map(item => (
+                              <NewsItemRow key={item.id} item={item} onDelete={deleteNews} />
+                          ))}
+                          {news.length === 0 && <p className="text-gray-500 text-sm italic">No hay noticias publicadas.</p>}
+                      </div>
+                  </div>
               </div>
 
               {/* GENERATED CONTENT & AUTOMATION STATUS COLUMN */}
@@ -358,9 +432,16 @@ const AdminPanel: React.FC = () => {
                   {/* MONITORING STATUS BOX */}
                   <div className="bg-black/60 border border-gray-700 p-6 rounded-xl relative overflow-hidden">
                       <div className="flex justify-between items-center mb-4">
-                          <h4 className="text-white font-bold flex items-center gap-2"><RefreshCw size={18} className="text-cine-gold animate-spin-slow"/> Monitor de Automatización</h4>
-                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${automationStatus.dailyCount >= 10 ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
-                              {automationStatus.dailyCount >= 10 ? 'Cupo Completo' : 'Sistema Activo'}
+                          <h4 className="text-white font-bold flex items-center gap-2">
+                              {automationStatus.isGenerating ? (
+                                  <Loader2 size={18} className="text-cine-gold animate-spin"/>
+                              ) : (
+                                  <RefreshCw size={18} className="text-cine-gold"/> 
+                              )}
+                              Monitor de Automatización
+                          </h4>
+                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${automationStatus.dailyCount >= 10 ? 'bg-red-900 text-red-200' : automationStatus.isGenerating ? 'bg-yellow-600 text-black animate-pulse' : 'bg-green-900 text-green-200'}`}>
+                              {automationStatus.isGenerating ? 'GENERANDO...' : automationStatus.dailyCount >= 10 ? 'Cupo Completo' : 'Sistema Activo'}
                           </span>
                       </div>
                       
@@ -385,7 +466,9 @@ const AdminPanel: React.FC = () => {
                                   <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Próximo Trigger</p>
                                   <p className="text-cine-gold font-mono flex items-center gap-1">
                                       <Clock size={12}/>
-                                      {automationStatus.dailyCount >= 10 ? 'Mañana' : (automationStatus.nextRun < Date.now() ? 'Ahora (al entrar usuario)' : formatTime(automationStatus.nextRun))}
+                                      {automationStatus.dailyCount >= 10 ? 'Mañana' : 
+                                       automationStatus.isGenerating ? 'En progreso...' :
+                                       (automationStatus.nextRun < Date.now() ? 'Ahora (al entrar usuario)' : formatTime(automationStatus.nextRun))}
                                   </p>
                               </div>
                           </div>
@@ -431,18 +514,30 @@ const AdminPanel: React.FC = () => {
               {/* DANGER ZONE */}
               <div className="bg-red-900/10 p-6 rounded-xl border border-red-900/50">
                   <h3 className="text-xl font-bold text-red-500 mb-4 flex items-center gap-2"><AlertTriangle size={20}/> Zona de Peligro</h3>
-                  <p className="text-gray-400 mb-4 text-sm">
-                      Acciones irreversibles. Úsalas con extrema precaución.
-                  </p>
-                  <button 
-                    onClick={handleResetGamification}
-                    className="bg-red-900 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-800 transition-colors w-full md:w-auto"
-                  >
-                      ⚠️ RESET TOTAL DE GAMIFICACIÓN
-                  </button>
-                  <p className="text-xs text-red-400 mt-2">
-                      * Pondrá a TODOS los usuarios en Nivel 1, XP 0 y borrará sus misiones. No afecta a las reseñas.
-                  </p>
+                  
+                  <div className="flex flex-col md:flex-row gap-4">
+                      <div className="flex-1 bg-black/30 p-4 rounded-lg border border-red-800/30">
+                          <h4 className="font-bold text-red-400 mb-2">Resetear Gamificación</h4>
+                          <p className="text-xs text-gray-400 mb-4">Pondrá a TODOS los usuarios en Nivel 1, XP 0. Irreversible.</p>
+                          <button 
+                            onClick={handleResetGamification}
+                            className="bg-red-900 text-white font-bold py-2 px-4 rounded hover:bg-red-800 transition-colors w-full text-sm"
+                          >
+                              ⚠️ EJECUTAR RESET TOTAL
+                          </button>
+                      </div>
+
+                      <div className="flex-1 bg-black/30 p-4 rounded-lg border border-red-800/30">
+                          <h4 className="font-bold text-red-400 mb-2">Resetear Automatización Noticias</h4>
+                          <p className="text-xs text-gray-400 mb-4">Desbloquea el sistema si se ha quedado atascado.</p>
+                          <button 
+                            onClick={handleResetAutomation}
+                            className="bg-red-900 text-white font-bold py-2 px-4 rounded hover:bg-red-800 transition-colors w-full text-sm"
+                          >
+                              🔄 DESBLOQUEAR SISTEMA
+                          </button>
+                      </div>
+                  </div>
               </div>
           </div>
       )}

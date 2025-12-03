@@ -417,47 +417,51 @@ const MovieDetails: React.FC = () => {
         </div>
       )}
 
-      {/* Hero Backdrop */}
-      <div className="relative h-[60vh] w-full">
+      {/* Hero Backdrop - Mobile Optimized */}
+      <div className="relative h-auto min-h-[60vh] md:h-[60vh] w-full flex flex-col justify-end">
           <div className="absolute inset-0 bg-gradient-to-t from-cine-dark via-cine-dark/60 to-transparent z-10"></div>
           <img 
             src={getImageUrl(details.backdrop_path, 'original')} 
             alt={details.title} 
-            className="w-full h-full object-cover opacity-60"
+            className="absolute inset-0 w-full h-full object-cover opacity-60 z-0"
           />
           <button 
             onClick={() => setView(ViewState.DASHBOARD)}
-            className="absolute top-4 left-4 z-20 bg-black/50 p-2 rounded-full hover:bg-cine-gold hover:text-black transition-colors text-white"
+            className="absolute top-4 left-4 z-30 bg-black/50 p-2 rounded-full hover:bg-cine-gold hover:text-black transition-colors text-white"
           >
               <ArrowLeft size={24} />
           </button>
 
-          <div className="absolute bottom-0 left-0 w-full p-6 z-20 container mx-auto flex flex-col md:flex-row gap-8 items-end">
+          <div className="relative z-20 container mx-auto p-4 md:p-6 flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-end mt-20 md:mt-0">
+              {/* Poster: Visible on mobile now, properly sized */}
               <img 
                 src={getImageUrl(details.poster_path)} 
                 alt="Poster" 
-                className="w-48 rounded-lg shadow-2xl border-2 border-gray-800 hidden md:block"
+                className="w-40 md:w-48 rounded-lg shadow-2xl border-2 border-gray-800 self-center md:self-auto"
               />
-              <div className="mb-4 w-full">
-                  <h1 className="text-4xl md:text-6xl font-bold text-white mb-2 drop-shadow-lg">{details.title}</h1>
-                  <div className="flex flex-wrap items-center gap-4 text-gray-300 text-sm md:text-base mb-6">
+              
+              <div className="w-full text-center md:text-left mb-4">
+                  <h1 className="text-3xl md:text-6xl font-bold text-white mb-2 drop-shadow-lg leading-tight">{details.title}</h1>
+                  
+                  {/* Metadata: Centered on mobile, left on desktop */}
+                  <div className="flex flex-wrap justify-center md:justify-start items-center gap-3 text-gray-300 text-sm md:text-base mb-6">
                       <span className="bg-cine-gold text-black px-2 py-1 rounded font-bold">{details.release_date.split('-')[0]}</span>
                       {isInDb && movies.find(m => m.tmdbId === details.id)?.totalVotes! > 0 && (
-                           <span className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded"><Star size={16} className="text-cine-gold" /> Nota Club: {movies.find(m => m.tmdbId === details.id)?.rating.toFixed(1)}</span>
+                           <span className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded"><Star size={16} className="text-cine-gold" /> Club: {movies.find(m => m.tmdbId === details.id)?.rating.toFixed(1)}</span>
                       )}
                       <span className="flex items-center gap-1"><Star size={16} className="text-gray-500" /> {details.vote_average.toFixed(1)} (TMDB)</span>
-                      <span>{details.genres.map(g => g.name).join(', ')}</span>
+                      <span>{details.genres.slice(0, 3).map(g => g.name).join(', ')}</span>
                   </div>
                   
-                  {/* Action Buttons Group */}
-                  <div className="flex flex-wrap gap-2 md:gap-4 p-2 bg-black/40 rounded-xl border border-gray-800 backdrop-blur-sm inline-flex">
+                  {/* Action Buttons Group - Stacked on mobile */}
+                  <div className="flex flex-col sm:flex-row flex-wrap gap-2 md:gap-4 p-2 bg-black/40 rounded-xl border border-gray-800 backdrop-blur-sm w-full md:w-auto md:inline-flex">
                       
                       {/* Button 1: NO VISTA (Default if nothing else) */}
                       <button 
                         onClick={handleUnwatchClick}
                         disabled={status === 'unwatched'}
                         className={`
-                            flex items-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border
+                            flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border w-full sm:w-auto
                             ${status === 'unwatched' 
                                 ? 'bg-cine-gray text-white border-red-900/50 shadow-[0_0_15px_rgba(153,27,27,0.3)]' 
                                 : 'bg-transparent text-gray-400 border-transparent hover:bg-white/5'}
@@ -471,7 +475,7 @@ const MovieDetails: React.FC = () => {
                       <button 
                         onClick={handleWatchlistClick}
                         className={`
-                            flex items-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border
+                            flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border w-full sm:w-auto
                             ${status === 'watchlist' 
                                 ? 'bg-cine-gray text-white border-cine-gold shadow-[0_0_15px_rgba(212,175,55,0.3)]' 
                                 : 'bg-transparent text-gray-400 border-transparent hover:bg-white/5'}
@@ -485,7 +489,7 @@ const MovieDetails: React.FC = () => {
                       <button 
                         onClick={handleWatchedClick}
                         className={`
-                            flex items-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border
+                            flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-bold transition-all border w-full sm:w-auto
                             ${status === 'watched' 
                                 ? 'bg-green-900/30 text-white border-green-600 shadow-[0_0_15px_rgba(22,163,74,0.3)]' 
                                 : 'bg-transparent text-gray-400 border-transparent hover:bg-white/5'}

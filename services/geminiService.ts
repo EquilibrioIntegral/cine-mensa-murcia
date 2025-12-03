@@ -248,62 +248,67 @@ export const enhanceUpdateContent = async (draft: string): Promise<{ title: stri
 export const generateCinemaNews = async (existingNewsTitles: string[] = []): Promise<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]> => {
     if (!isAiAvailable()) return [];
 
-    const exclusionList = existingNewsTitles.join(", ");
+    // Optimize context: Take last 50 titles (including banned ones which are passed in here)
+    const recentTitles = existingNewsTitles.slice(0, 50);
+    const exclusionList = recentTitles.join(", ");
 
     const prompt = `
         Utiliza la herramienta Google Search para buscar las noticias de cine más importantes y recientes de las últimas 24 HORAS.
         
-        TEMAS A EVITAR (YA PUBLICADOS):
+        ⛔️ LISTA DE EXCLUSIÓN (TEMAS PROHIBIDOS/YA PUBLICADOS/BORRADOS):
         ${exclusionList}
-        (No generes noticias repetidas sobre estos temas específicos).
-
-        Céntrate en:
-        - Resultados de taquilla.
-        - Nuevos trailers lanzados hoy/ayer.
-        - Premios recientes o festivales.
-        - Declaraciones virales.
         
-        Selecciona las 3 noticias más relevantes y redactalas para el club "Cine Mensa Murcia".
+        INSTRUCCIONES DE SEGURIDAD ANTI-DUPLICADOS:
+        1. Comprueba la lista de exclusión. Si una noticia trata sobre el mismo tema principal (aunque el título sea diferente), DESCÁRTALA.
+        2. Ej: Si "Zootropolis 2" está en la lista, NO generes nada sobre Zootropolis 2.
+        3. Si no encuentras ninguna noticia 100% nueva e impactante que no esté en la lista, devuelve un array vacío [].
+        4. Es preferible devolver [] a repetir contenido.
         
         Para cada noticia genera:
         1. "title": Un titular periodístico en español atractivo.
-        2. "content": Un ARTÍCULO PERIODÍSTICO COMPLETO y EXTENSO. 
-           - Mínimo 3 o 4 párrafos bien desarrollados.
-           - Incluye contexto, antecedentes, citas si las hay, y un pequeño análisis.
-           - No te limites a un resumen corto. Queremos leer la historia completa.
-        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen IA (ej: "close up of actor X, cinematic lighting").
-        4. "searchQuery": El nombre exacto de la película, actor o director protagonista para buscar su foto REAL en una base de datos (ej: "Brad Pitt", "Dune: Part Two", "Christopher Nolan").
+        2. "content": Un ARTÍCULO PERIODÍSTICO COMPLETO y EXTENSO (Mínimo 3 párrafos).
+        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen IA (solo si falla TMDB).
+        4. "searchQuery": EL TÍTULO EXACTO DE LA PELÍCULA O ACTOR. 
+           - IMPORTANTE: Solo el nombre. Sin "Trailer", sin "Estreno", sin "Noticia". 
+           - Ejemplo MAL: "Trailer de Mufasa". Ejemplo BIEN: "Mufasa: The Lion King".
+           - Esto se usará para buscar la foto real en una base de datos. Sé preciso.
 
-        IMPORTANTE:
-        Devuelve la respuesta ESTRICTAMENTE como un JSON Array dentro de un bloque de código markdown json.
-        
-        Ejemplo de salida esperada:
-        \`\`\`json
+        Formato JSON Array PURO (Sin markdown):
         [
-          { "title": "...", "content": "Texto largo...", "visualPrompt": "...", "searchQuery": "..." }
+          { "title": "...", "content": "...", "visualPrompt": "...", "searchQuery": "..." }
         ]
-        \`\`\`
     `;
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash",
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             config: {
                 tools: [{ googleSearch: {} }],
             }
         });
 
-        const text = response.text || "";
+        let text = response.text || "";
         
-        const jsonMatch = text.match(/```json\s*(\[\s*[\s\S]*?\s*\])\s*```/) || text.match(/\[\s*[\s\S]*?\s*\]/);
+        // CLEANUP: Remove markdown code blocks if present
+        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
         
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        try {
+            // Attempt to find the array bracket
+            const start = text.indexOf('[');
+            const end = text.lastIndexOf(']');
+            if (start !== -1 && end !== -1) {
+                text = text.substring(start, end + 1);
+            }
+
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) return parsed;
+            if (typeof parsed === 'object') return [parsed];
+            return [];
+        } catch (e) {
+            console.warn("JSON Parse Failed in News Gen. Raw text:", text);
+            return [];
         }
-        
-        console.warn("No se encontró JSON válido en la respuesta de noticias:", text);
-        return [];
 
     } catch (e) {
         console.error("News Gen Error:", String(e));

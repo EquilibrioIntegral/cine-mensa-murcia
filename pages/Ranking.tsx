@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { Trophy, Users, Star, ThumbsUp, Medal } from 'lucide-react';
@@ -77,42 +76,51 @@ const Ranking: React.FC = () => {
       </div>
 
       {activeTab === 'movies' && (
-          <div className="grid gap-6 animate-fade-in">
+          <div className="grid gap-4 md:gap-6 animate-fade-in">
             {sortedMovies.map((movie, index) => (
               <div 
                 key={movie.id} 
                 onClick={() => setView(ViewState.MOVIE_DETAILS, movie.id)}
-                className="flex flex-col md:flex-row bg-cine-gray rounded-xl overflow-hidden border border-gray-800 hover:border-cine-gold transition-colors cursor-pointer group"
+                className="flex flex-col md:flex-row bg-cine-gray rounded-xl overflow-hidden border border-gray-800 hover:border-cine-gold transition-colors cursor-pointer group relative shadow-md"
               >
-                {/* Rank Number */}
-                <div className="bg-black/30 w-full md:w-24 flex items-center justify-center p-4 border-r border-gray-800 transition-colors group-hover:bg-cine-gold/10 relative">
+                {/* Rank Number - Mobile Floating */}
+                <div className="absolute top-2 left-2 z-20 md:hidden">
+                    <div className={`w-10 h-10 flex items-center justify-center font-bold text-lg rounded-full shadow-lg border-2 border-gray-800 ${index === 0 ? 'bg-cine-gold text-black' : index === 1 ? 'bg-gray-300 text-black' : index === 2 ? 'bg-amber-700 text-white' : 'bg-black/90 text-white'}`}>
+                        #{index + 1}
+                    </div>
+                </div>
+
+                {/* Rank Number - Desktop Sidebar */}
+                <div className="hidden md:flex bg-black/30 w-24 flex-shrink-0 items-center justify-center p-4 border-r border-gray-800 transition-colors group-hover:bg-cine-gold/10 relative">
                     <span className={`text-5xl font-bold ${index === 0 ? 'text-cine-gold' : index === 1 ? 'text-gray-300' : index === 2 ? 'text-amber-700' : 'text-gray-600'}`}>
                         #{index + 1}
                     </span>
                     {index === 0 && <Star className="absolute top-2 right-2 text-cine-gold animate-spin-slow" size={16} fill="currentColor" />}
                 </div>
 
-                <div className="w-full md:w-48 h-64 md:h-auto flex-shrink-0">
-                    <img src={movie.posterUrl} alt={movie.title} className="w-full h-full object-cover" />
+                <div className="w-full md:w-48 h-40 md:h-auto flex-shrink-0 relative">
+                    <img src={movie.posterUrl} alt={movie.title} className="w-full h-full object-cover object-top" />
+                    {/* Mobile Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-cine-gray via-transparent to-transparent md:hidden"></div>
                 </div>
 
-                <div className="p-6 flex flex-col justify-center flex-grow">
+                <div className="p-4 md:p-6 flex flex-col justify-center flex-grow -mt-10 md:mt-0 relative z-10">
                     <div className="flex justify-between items-start mb-2">
-                        <div>
-                            <h3 className="text-2xl font-bold text-white group-hover:text-cine-gold transition-colors">{movie.title}</h3>
-                            <p className="text-cine-gold">{movie.director} • {movie.year}</p>
+                        <div className="pr-4">
+                            <h3 className="text-xl md:text-2xl font-bold text-white group-hover:text-cine-gold transition-colors leading-tight">{movie.title}</h3>
+                            <p className="text-cine-gold text-sm md:text-base">{movie.director} • {movie.year}</p>
                         </div>
-                        <div className="text-right">
-                            <div className="text-4xl font-bold text-white">{movie.rating.toFixed(1)}</div>
-                            <div className="text-sm text-gray-500">{movie.totalVotes} votos</div>
+                        <div className="text-right flex-shrink-0">
+                            <div className="text-3xl md:text-4xl font-bold text-white">{movie.rating.toFixed(1)}</div>
+                            <div className="text-xs md:text-sm text-gray-500">{movie.totalVotes} votos</div>
                         </div>
                     </div>
                     
-                    <p className="text-gray-400 mt-2 line-clamp-2">{movie.description}</p>
+                    <p className="text-gray-400 mt-2 line-clamp-2 text-sm md:text-base">{movie.description}</p>
                     
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                         {movie.genre.map(g => (
-                            <span key={g} className="text-xs px-2 py-1 rounded bg-black text-gray-400 border border-gray-800">
+                            <span key={g} className="text-[10px] md:text-xs px-2 py-1 rounded bg-black text-gray-400 border border-gray-800">
                                 {g}
                             </span>
                         ))}
@@ -146,30 +154,30 @@ const Ranking: React.FC = () => {
 
               {sortedCritics.map((critic, index) => (
                   <div key={critic.id} className="bg-cine-gray p-4 rounded-xl border border-gray-800 flex items-center justify-between hover:bg-white/5 transition-colors">
-                      <div className="flex items-center gap-4">
-                          <div className={`w-12 h-12 flex items-center justify-center font-bold text-xl rounded-full ${index === 0 ? 'bg-cine-gold text-black shadow-[0_0_15px_rgba(212,175,55,0.5)]' : 'bg-black text-gray-500'}`}>
+                      <div className="flex items-center gap-3 md:gap-4">
+                          <div className={`w-10 h-10 md:w-12 md:h-12 flex items-center justify-center font-bold text-lg md:text-xl rounded-full flex-shrink-0 ${index === 0 ? 'bg-cine-gold text-black shadow-[0_0_15px_rgba(212,175,55,0.5)]' : 'bg-black text-gray-500'}`}>
                               #{index + 1}
                           </div>
-                          <img src={critic.avatarUrl} alt={critic.name} className="w-14 h-14 rounded-full border-2 border-gray-700" />
-                          <div>
-                              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                          <img src={critic.avatarUrl} alt={critic.name} className="w-12 h-12 md:w-14 md:h-14 rounded-full border-2 border-gray-700 flex-shrink-0" />
+                          <div className="min-w-0">
+                              <h3 className="text-lg md:text-xl font-bold text-white flex items-center gap-2 truncate">
                                   {critic.name}
-                                  {index === 0 && <Star size={16} className="text-cine-gold" fill="currentColor" />}
+                                  {index === 0 && <Star size={16} className="text-cine-gold flex-shrink-0" fill="currentColor" />}
                               </h3>
-                              <p className="text-sm text-gray-400">{critic.reviewCount} reseñas escritas</p>
+                              <p className="text-xs md:text-sm text-gray-400">{critic.reviewCount} reseñas</p>
                           </div>
                       </div>
 
-                      <div className="flex items-center gap-8 text-right">
+                      <div className="flex flex-col md:flex-row items-end md:items-center gap-2 md:gap-8 text-right">
                           <div className="hidden md:block">
-                              <p className="text-xs text-gray-500 uppercase font-bold">Nota Media Dada</p>
+                              <p className="text-xs text-gray-500 uppercase font-bold">Nota Media</p>
                               <p className="text-lg font-bold text-gray-300">{critic.avgGiven}</p>
                           </div>
-                          <div className="bg-black/40 px-6 py-2 rounded-lg border border-gray-700">
-                              <p className="text-xs text-cine-gold uppercase font-bold flex items-center justify-end gap-1">
-                                  <ThumbsUp size={12} /> Prestigio
+                          <div className="bg-black/40 px-4 md:px-6 py-2 rounded-lg border border-gray-700 flex flex-col items-end">
+                              <p className="text-[10px] md:text-xs text-cine-gold uppercase font-bold flex items-center justify-end gap-1">
+                                  <ThumbsUp size={10} /> Prestigio
                               </p>
-                              <p className="text-2xl font-bold text-white">{critic.prestige}</p>
+                              <p className="text-xl md:text-2xl font-bold text-white">{critic.prestige}</p>
                           </div>
                       </div>
                   </div>

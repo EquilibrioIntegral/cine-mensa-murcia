@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import MovieCard from '../components/MovieCard';
@@ -64,15 +63,15 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Toolbar */}
-      <div className="bg-cine-gray p-4 rounded-xl border border-gray-800 mb-8 flex flex-col md:flex-row gap-4 justify-between items-center sticky top-20 z-20 shadow-xl backdrop-blur-md bg-cine-gray/90">
+      <div className="bg-cine-gray p-4 rounded-xl border border-gray-800 mb-8 flex flex-col md:flex-row gap-4 justify-between items-center sticky top-16 z-20 shadow-xl backdrop-blur-md bg-cine-gray/95">
           
           {/* Genre Filter */}
           <div className="flex items-center gap-2 w-full md:w-auto">
-              <Filter size={18} className="text-cine-gold" />
+              <Filter size={18} className="text-cine-gold flex-shrink-0" />
               <select 
                 value={filterGenre}
                 onChange={(e) => setFilterGenre(e.target.value)}
-                className="bg-black/50 border border-gray-600 text-white text-sm rounded-lg p-2.5 focus:border-cine-gold outline-none w-full md:w-48 cursor-pointer"
+                className="bg-black/50 border border-gray-600 text-white text-sm rounded-lg p-2.5 focus:border-cine-gold outline-none w-full md:w-48 cursor-pointer truncate"
               >
                   <option value="all">Todos los géneros</option>
                   {allGenres.map(g => (
@@ -89,28 +88,28 @@ const Dashboard: React.FC = () => {
                 onClick={() => setSortBy('recent')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${sortBy === 'recent' ? 'bg-cine-gold text-black' : 'bg-black/40 text-gray-400 hover:bg-black/60'}`}
               >
-                  <Calendar size={14} /> Recientes
+                  <Calendar size={14} /> <span className="hidden sm:inline">Recientes</span>
               </button>
               
               <button 
                 onClick={() => setSortBy('oldest')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${sortBy === 'oldest' ? 'bg-cine-gold text-black' : 'bg-black/40 text-gray-400 hover:bg-black/60'}`}
               >
-                  <SortAsc size={14} /> Clásicas
+                  <SortAsc size={14} /> <span className="hidden sm:inline">Clásicas</span>
               </button>
               
               <button 
                 onClick={() => setSortBy('rating')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${sortBy === 'rating' ? 'bg-cine-gold text-black' : 'bg-black/40 text-gray-400 hover:bg-black/60'}`}
               >
-                  <Star size={14} /> Nota
+                  <Star size={14} /> <span className="hidden sm:inline">Nota</span>
               </button>
 
               <button 
                 onClick={() => setSortBy('alpha')}
                 className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${sortBy === 'alpha' ? 'bg-cine-gold text-black' : 'bg-black/40 text-gray-400 hover:bg-black/60'}`}
               >
-                  <Type size={14} /> A-Z
+                  <Type size={14} /> <span className="hidden sm:inline">A-Z</span>
               </button>
           </div>
       </div>
