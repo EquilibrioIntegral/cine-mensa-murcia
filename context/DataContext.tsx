@@ -1,6 +1,8 @@
 
+
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage } from '../types';
+import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage, MailboxMessage } from '../types';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -164,6 +166,12 @@ interface DataContextType {
   leavePrivateChat: () => Promise<void>;
   sendPrivateMessage: (text: string, type?: 'text' | 'system') => Promise<void>;
   setPrivateChatTyping: (isTyping: boolean) => Promise<void>;
+
+  // MAILBOX
+  mailbox: MailboxMessage[];
+  sendSystemMessage: (userId: string, title: string, body: string, type?: 'system' | 'reward' | 'alert' | 'info') => Promise<void>;
+  markMessageRead: (messageId: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -194,6 +202,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Private Chat State
   const [activePrivateChat, setActivePrivateChat] = useState<{ session: PrivateChatSession, messages: PrivateChatMessage[] } | null>(null);
+
+  // Mailbox State
+  const [mailbox, setMailbox] = useState<MailboxMessage[]>([]);
 
   // Refs for Live API Audio (Persisted in Provider)
   const liveSessionRef = useRef<any>(null);
@@ -242,6 +253,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     return () => unsubscribe();
   }, []);
+
+  // MAILBOX LISTENER
+  useEffect(() => {
+      if (!user) {
+          setMailbox([]);
+          return;
+      }
+      const q = query(collection(db, `users/${user.id}/mailbox`), orderBy('timestamp', 'desc'));
+      const unsub = onSnapshot(q, (snap) => {
+          setMailbox(snap.docs.map(d => ({ ...d.data(), id: d.id } as MailboxMessage)));
+      });
+      return () => unsub();
+  }, [user?.id]);
 
   // --- PRIVATE CHAT LISTENER ---
   useEffect(() => {
@@ -528,12 +552,42 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   };
 
+  const sendSystemMessage = async (userId: string, title: string, body: string, type: 'system' | 'reward' | 'alert' | 'info' = 'system') => {
+      const msg: MailboxMessage = {
+          id: `msg_${Date.now()}_${Math.random()}`,
+          title,
+          body,
+          timestamp: Date.now(),
+          read: false,
+          type
+      };
+      try {
+          await addDoc(collection(db, `users/${userId}/mailbox`), msg);
+      } catch (e) { console.error("Error sending system msg", e); }
+  };
+
+  const markMessageRead = async (messageId: string) => {
+      if (!user) return;
+      try {
+          await updateDoc(doc(db, `users/${user.id}/mailbox`, messageId), { read: true });
+      } catch (e) { console.error("Error marking read", e); }
+  };
+
+  const deleteMessage = async (messageId: string) => {
+      if (!user) return;
+      try {
+          await deleteDoc(doc(db, `users/${user.id}/mailbox`, messageId));
+      } catch (e) { console.error("Error deleting msg", e); }
+  };
+
   const earnCredits = async (amount: number, reason: string) => {
       if (!user) return;
       try {
           const newCredits = (user.credits || 0) + amount;
           await updateDoc(doc(db, 'users', user.id), { credits: newCredits });
           setNotification({ message: `+${amount} Créditos: ${reason}`, type: 'shop' });
+          // Also send to mailbox for record
+          sendSystemMessage(user.id, "Créditos Recibidos", `Has recibido ${amount} créditos. Motivo: ${reason}`, 'reward');
       } catch (e) { console.error("Error earning credits", e); }
   };
 
@@ -554,6 +608,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               message: user.isAdmin ? `¡Artículo comprado (Admin)!` : `¡Artículo comprado!`, 
               type: 'shop' 
           });
+          sendSystemMessage(user.id, "Compra Realizada", `Has gastado ${amount} créditos en la tienda.`, 'info');
           return true;
       } catch (e) { console.error("Error spending credits", e); return false; }
   };
@@ -640,6 +695,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
               
               if (missionsCompletedNow.length > 0) {
                   setNotification({ message: `¡Misión Completada: ${missionsCompletedNow[0].title}! (+${missionsCompletedNow[0].xpReward} XP)`, type: 'mission' });
+                  // Send Mailbox notification for mission complete
+                  sendSystemMessage(currentUser.id, "Misión Completada", `Has completado: "${missionsCompletedNow[0].title}". Recompensa: +${missionsCompletedNow[0].xpReward} XP.`, 'reward');
               }
           } catch(e) { console.error("Gamification update error", e); }
       }
@@ -690,6 +747,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   rankTitle: newRank ? newRank.title : `Nivel ${nextLevel}`,
                   level: nextLevel
               });
+              
+              sendSystemMessage(user.id, "¡Ascenso de Nivel!", `Felicidades por alcanzar el Nivel ${nextLevel}. Has recibido ${rewardCredits} créditos.`, 'reward');
               
           } catch(e) { console.error("Error completing level up", e); }
       }
@@ -1087,7 +1146,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetPassword = async (email: string) => { try { await sendPasswordResetEmail(auth, email); return { success: true, message: 'Correo enviado.' }; } catch (e: any) { return { success: false, message: e.message }; } };
   const updateUserProfile = async (name: string, avatarUrl: string) => { if (!user) return; await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); const updatedUser = { ...user, name, avatarUrl }; checkAchievements(updatedUser); };
-  const approveUser = async (userId: string) => { await updateDoc(doc(db, 'users', userId), { status: 'active' }); };
+  const approveUser = async (userId: string) => { 
+      await updateDoc(doc(db, 'users', userId), { status: 'active' }); 
+      // Send Welcome Message to Mailbox
+      sendSystemMessage(userId, "¡Bienvenido a Cine Mensa!", "Tu cuenta ha sido aprobada por el administrador. Ya puedes disfrutar de todas las funciones, votar en eventos y completar misiones.", 'system');
+  };
   const rejectUser = async (userId: string) => { await updateDoc(doc(db, 'users', userId), { status: 'rejected' }); };
   const setView = (view: ViewState, movieId?: string) => { setCurrentView(view); if (movieId) setSelectedMovieId(movieId); };
   const addMovie = async (movie: Movie) => { const existingRef = doc(db, 'movies', movie.id); await setDoc(existingRef, movie); };
@@ -1157,7 +1220,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   const resolveFeedback = async (feedbackId: string, response?: string) => { await updateDoc(doc(db, 'feedback', feedbackId), { status: 'solved', adminResponse: response }); const fb = feedbackList.find(f => f.id === feedbackId); if (fb) { await publishNews(fb.type === 'bug' ? '🐛 Bug Exterminado' : '✨ Nueva Funcionalidad', `Gracias al reporte de ${fb.userName}, hemos solucionado: "${fb.text}".`, 'update'); } };
   const deleteFeedback = async (id: string) => { await deleteDoc(doc(db, 'feedback', id)); };
-  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => { await addDoc(collection(db, 'news'), { title, content, type, imageUrl, timestamp: Date.now() }); };
+  
+  // FIX: Ensure imageUrl is null if undefined
+  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => { 
+      await addDoc(collection(db, 'news'), { title, content, type, imageUrl: imageUrl || null, timestamp: Date.now() }); 
+  };
   
   const deleteNews = async (id: string) => { 
       try {
@@ -1187,7 +1254,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

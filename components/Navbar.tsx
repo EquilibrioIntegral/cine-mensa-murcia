@@ -1,11 +1,14 @@
+
 import React, { useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell, ShoppingBag, Gamepad2 } from 'lucide-react';
+import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell, ShoppingBag, Gamepad2, Mail } from 'lucide-react';
 import RankBadge from './RankBadge';
 
 const Navbar: React.FC = () => {
-  const { user, setView, currentView, logout, notification, clearNotification } = useData();
+  const { user, setView, currentView, logout, notification, clearNotification, mailbox } = useData();
+
+  const unreadCount = mailbox ? mailbox.filter(m => !m.read).length : 0;
 
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
@@ -76,12 +79,18 @@ const Navbar: React.FC = () => {
                     </div>
                 )}
 
+                {/* Mailbox Icon */}
                 <button 
-                    onClick={() => setView(ViewState.FEEDBACK)}
-                    className="p-2 text-gray-400 hover:text-cine-gold transition-colors hidden sm:block"
-                    title="Reportar Bug o Mejora"
+                    onClick={() => setView(ViewState.MAILBOX)}
+                    className={`relative p-2 rounded-full transition-colors ${currentView === ViewState.MAILBOX ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                    title="Buzón de Mensajes"
                 >
-                    <Bug size={20} />
+                    <Mail size={20} />
+                    {unreadCount > 0 && (
+                        <span className="absolute top-0 right-0 w-4 h-4 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                            {unreadCount}
+                        </span>
+                    )}
                 </button>
 
                 <div className="hidden md:flex items-center gap-3 cursor-pointer group" onClick={() => setView(ViewState.PROFILE)}>

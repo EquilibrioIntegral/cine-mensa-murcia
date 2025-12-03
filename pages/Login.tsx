@@ -3,6 +3,36 @@ import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Film, X, Mail } from 'lucide-react';
 
+// Helper function to translate Firebase errors
+const getFriendlyErrorMessage = (errorMsg: string) => {
+    const msg = errorMsg.toLowerCase();
+    
+    if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) {
+        return "Credenciales incorrectas. El correo no existe o la contraseña está mal.";
+    }
+    if (msg.includes('auth/email-already-in-use')) {
+        return "Este correo electrónico ya está registrado. Intenta iniciar sesión.";
+    }
+    if (msg.includes('auth/weak-password')) {
+        return "La contraseña es muy débil. Debe tener al menos 6 caracteres.";
+    }
+    if (msg.includes('auth/invalid-email')) {
+        return "El formato del correo electrónico no es válido.";
+    }
+    if (msg.includes('auth/too-many-requests')) {
+        return "Demasiados intentos fallidos. El acceso se ha bloqueado temporalmente. Inténtalo más tarde.";
+    }
+    if (msg.includes('auth/network-request-failed')) {
+        return "Error de conexión. Comprueba tu conexión a internet.";
+    }
+    if (msg.includes('auth/missing-email')) {
+        return "Por favor, introduce un correo electrónico.";
+    }
+    
+    // Fallback for unknown errors
+    return "Ocurrió un error inesperado. Por favor, inténtalo de nuevo.";
+};
+
 const Login: React.FC = () => {
   const { login, register, resetPassword } = useData();
   const [isRegistering, setIsRegistering] = useState(false);
@@ -42,18 +72,22 @@ const Login: React.FC = () => {
             }
             // Eliminado el paso del avatar. Se generará automático en DataContext.
             const result = await register(email, name, password);
-            setMessage({ type: result.success ? 'success' : 'error', text: result.message });
-            if (result.success && !result.message.includes('Administrador')) {
-                // Stay on screen to show "Pending approval" message
+            if (result.success) {
+                setMessage({ type: 'success', text: result.message });
+                if (!result.message.includes('Administrador')) {
+                    // Stay on screen to show "Pending approval" message
+                }
+            } else {
+                setMessage({ type: 'error', text: getFriendlyErrorMessage(result.message) });
             }
         } else {
             const result = await login(email, password);
             if (!result.success) {
-                setMessage({ type: 'error', text: result.message });
+                setMessage({ type: 'error', text: getFriendlyErrorMessage(result.message) });
             }
         }
     } catch (error: any) {
-        setMessage({ type: 'error', text: "Error inesperado: " + error.message });
+        setMessage({ type: 'error', text: getFriendlyErrorMessage(error.message) });
     } finally {
         setLoading(false);
     }
@@ -64,10 +98,13 @@ const Login: React.FC = () => {
       if (!resetEmail) return;
       
       const res = await resetPassword(resetEmail);
-      alert(res.message); // Simple alert or custom message
+      
       if (res.success) {
+          alert(res.message);
           setShowResetModal(false);
           setResetEmail('');
+      } else {
+          alert(getFriendlyErrorMessage(res.message));
       }
   };
 

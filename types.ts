@@ -80,7 +80,8 @@ export enum ViewState {
   FEEDBACK,
   PROFILE,
   SHOP,    // New: Tienda de Premios
-  ARCADE   // New: Zona de Minijuegos/Misiones
+  ARCADE,   // New: Zona de Minijuegos/Misiones
+  MAILBOX  // New: Personal System Mailbox
 }
 
 // --- NEW EVENT TYPES ---
@@ -263,4 +264,14 @@ export interface PrivateChatSession {
     isActive: boolean;
     createdAt: number;
     typing?: Record<string, boolean>; // Map of userId -> isTyping
+}
+
+// --- MAILBOX TYPES ---
+export interface MailboxMessage {
+  id: string;
+  title: string;
+  body: string;
+  timestamp: number;
+  read: boolean;
+  type: 'system' | 'reward' | 'alert' | 'info';
 }

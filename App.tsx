@@ -1,4 +1,6 @@
 
+
+
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -15,6 +17,7 @@ import Feedback from './pages/Feedback';
 import Profile from './pages/Profile';
 import Shop from './pages/Shop';
 import Arcade from './pages/Arcade';
+import Mailbox from './pages/Mailbox';
 import CareerMilestoneModal from './components/CareerMilestoneModal';
 import PrivateChatModal from './components/PrivateChatModal';
 import { ViewState } from './types';
@@ -90,6 +93,7 @@ const AppContent: React.FC = () => {
         {currentView === ViewState.PROFILE && <Profile />}
         {currentView === ViewState.SHOP && <Shop />}
         {currentView === ViewState.ARCADE && <Arcade />}
+        {currentView === ViewState.MAILBOX && <Mailbox />}
       </main>
 
       <footer className="bg-black py-6 mt-auto border-t border-gray-900">
