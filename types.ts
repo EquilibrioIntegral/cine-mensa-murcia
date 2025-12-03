@@ -235,10 +235,30 @@ export interface ShopItem {
   minLevel: number;
   icon: any;
   type: 'cosmetic' | 'feature' | 'badge';
+  prerequisiteId?: string; // NEW: Dependency on another item
 }
 
 export interface MilestoneEvent {
     type: 'welcome' | 'levelup' | 'challenge_ready';
     rankTitle: string;
     level: number;
+}
+
+// --- PRIVATE CHAT TYPES ---
+export interface PrivateChatMessage {
+    id: string;
+    senderId: string;
+    senderName: string;
+    text: string;
+    timestamp: number;
+}
+
+export interface PrivateChatSession {
+    id: string;
+    creatorId: string;
+    targetId: string;
+    creatorName: string;
+    targetName: string;
+    isActive: boolean;
+    createdAt: number;
 }

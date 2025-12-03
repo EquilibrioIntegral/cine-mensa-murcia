@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -15,6 +16,7 @@ import Profile from './pages/Profile';
 import Shop from './pages/Shop';
 import Arcade from './pages/Arcade';
 import CareerMilestoneModal from './components/CareerMilestoneModal';
+import PrivateChatModal from './components/PrivateChatModal';
 import { ViewState } from './types';
 import { Clock, ShieldAlert } from 'lucide-react';
 
@@ -71,6 +73,9 @@ const AppContent: React.FC = () => {
               onAction={handleMilestoneAction}
           />
       )}
+
+      {/* PRIVATE CHAT OVERLAY */}
+      <PrivateChatModal />
 
       <main className="flex-grow">
         {currentView === ViewState.NEWS && <News />}

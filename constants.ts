@@ -1,7 +1,6 @@
 
-
 import { Movie, UserRating, Rank, Mission, User, ShopItem, LevelChallenge } from "./types";
-import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot } from 'lucide-react';
+import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot, MessageCircle } from 'lucide-react';
 
 // Base de datos vacía como solicitado
 export const INITIAL_MOVIES: Movie[] = [];
@@ -454,5 +453,15 @@ export const SHOP_ITEMS: ShopItem[] = [
         minLevel: 1,
         icon: Radar,
         type: 'feature'
+    },
+    {
+        id: 'item_private_chat',
+        title: 'Chat en Solitario',
+        description: 'Permite abrir salas de chat privadas con usuarios conectados desde el Radar.',
+        cost: 100,
+        minLevel: 1,
+        icon: MessageCircle,
+        type: 'feature',
+        prerequisiteId: 'item_online_tracker'
     }
 ];

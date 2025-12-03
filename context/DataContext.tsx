@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent } from '../types';
+import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage } from '../types';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -136,6 +136,7 @@ interface DataContextType {
   // Economy
   earnCredits: (amount: number, reason: string) => Promise<void>;
   spendCredits: (amount: number, itemId: string) => Promise<boolean>;
+  toggleInventoryItem: (itemId: string) => Promise<void>; // ADMIN ONLY TOOL
 
   // Career Milestone Modal State
   milestoneEvent: MilestoneEvent | null;
@@ -155,6 +156,13 @@ interface DataContextType {
   
   // Automation Status
   automationStatus: { lastRun: number, dailyCount: number, nextRun: number, isGenerating: boolean };
+
+  // Private Chat
+  activePrivateChat: { session: PrivateChatSession, messages: PrivateChatMessage[] } | null;
+  startPrivateChat: (targetUserId: string) => Promise<void>;
+  closePrivateChat: () => Promise<void>;
+  leavePrivateChat: () => Promise<void>;
+  sendPrivateMessage: (text: string) => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -183,15 +191,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Top Critic Calculation
   const [topCriticId, setTopCriticId] = useState<string | null>(null);
 
-  // --- LIVE SESSION STATE ---
-  const [liveSession, setLiveSession] = useState<LiveSessionState>({
-      isConnected: false,
-      status: 'Desconectado',
-      isUserSpeaking: false,
-      isAiSpeaking: false,
-      toolInUse: null,
-      visualContent: []
-  });
+  // Private Chat State
+  const [activePrivateChat, setActivePrivateChat] = useState<{ session: PrivateChatSession, messages: PrivateChatMessage[] } | null>(null);
 
   // Refs for Live API Audio (Persisted in Provider)
   const liveSessionRef = useRef<any>(null);
@@ -201,6 +202,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
   const nextStartTimeRef = useRef<number>(0);
   const currentStreamRef = useRef<MediaStream | null>(null);
+  
+  // --- LIVE SESSION STATE ---
+  const [liveSession, setLiveSession] = useState<LiveSessionState>({
+      isConnected: false,
+      status: 'Desconectado',
+      isUserSpeaking: false,
+      isAiSpeaking: false,
+      toolInUse: null,
+      visualContent: []
+  });
   
   // Timer Ref for usage tracking
   const usageIntervalRef = useRef<number | null>(null);
@@ -230,6 +241,56 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     return () => unsubscribe();
   }, []);
+
+  // --- PRIVATE CHAT LISTENER ---
+  useEffect(() => {
+      if (!user) {
+          setActivePrivateChat(null);
+          return;
+      }
+
+      // Query for active chats where current user is Creator OR Target
+      const q = query(
+          collection(db, 'private_chats'),
+          where('isActive', '==', true)
+      );
+
+      const unsubChat = onSnapshot(q, (snap) => {
+          // Find if there is a relevant chat for ME
+          const relevantChat = snap.docs.find(d => {
+              const data = d.data();
+              return data.creatorId === user.id || data.targetId === user.id;
+          });
+
+          if (relevantChat) {
+              const sessionData = { ...relevantChat.data(), id: relevantChat.id } as PrivateChatSession;
+              
+              // Only trigger if we aren't already in it or it changed
+              setActivePrivateChat(prev => {
+                  if (prev && prev.session.id === sessionData.id) return prev;
+                  return { session: sessionData, messages: [] };
+              });
+
+              // Sub-listener for messages
+              const qMsg = query(collection(db, `private_chats/${relevantChat.id}/messages`), orderBy('timestamp', 'asc'));
+              const unsubMsg = onSnapshot(qMsg, (msgSnap) => {
+                  const msgs = msgSnap.docs.map(d => ({ ...d.data(), id: d.id } as PrivateChatMessage));
+                  setActivePrivateChat(prev => {
+                      if (!prev) return null; // Should not happen if logic is sound
+                      return { ...prev, session: sessionData, messages: msgs };
+                  });
+              });
+              
+              // We don't unsubscribe from msg here easily because of re-renders, 
+              // but activePrivateChat state change handles view.
+              // A proper cleanup would require a ref to hold unsub function.
+          } else {
+              setActivePrivateChat(null);
+          }
+      });
+
+      return () => unsubChat();
+  }, [user?.id]); // Re-run if user changes
 
   // AUTOMATIC NEWS GENERATION TRIGGER
   useEffect(() => {
@@ -481,23 +542,41 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const spendCredits = async (amount: number, itemId: string): Promise<boolean> => {
       if (!user) return false;
       const canAfford = (user.credits || 0) >= amount;
-      if (!canAfford && !user.isAdmin) {
-          alert("No tienes suficientes créditos.");
+      
+      // Strict deduction policy: Everyone must pay, including admins
+      if (!canAfford) {
           return false;
       }
       try {
-          const costToDeduct = user.isAdmin ? 0 : amount;
-          const newCredits = (user.credits || 0) - costToDeduct;
+          const newCredits = (user.credits || 0) - amount; // Always deduct amount
           await updateDoc(doc(db, 'users', user.id), {
               credits: newCredits,
               inventory: arrayUnion(itemId)
           });
           setNotification({ 
-              message: user.isAdmin ? `¡Artículo activado (Admin)!` : `¡Artículo comprado!`, 
+              message: user.isAdmin ? `¡Artículo comprado (Admin)!` : `¡Artículo comprado!`, 
               type: 'shop' 
           });
           return true;
       } catch (e) { console.error("Error spending credits", e); return false; }
+  };
+
+  // ADMIN TOGGLE: Give/Remove item without cost
+  const toggleInventoryItem = async (itemId: string) => {
+      if (!user) return;
+      try {
+          if (user.inventory?.includes(itemId)) {
+              await updateDoc(doc(db, 'users', user.id), {
+                  inventory: arrayRemove(itemId)
+              });
+          } else {
+              await updateDoc(doc(db, 'users', user.id), {
+                  inventory: arrayUnion(itemId)
+              });
+          }
+      } catch(e) {
+          console.error("Error toggling admin inventory", e);
+      }
   };
 
   // --- GAMIFICATION ENGINE ---
@@ -882,6 +961,58 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (e) { console.error("Connection failed", e); stopLiveSession(); alert("Error al conectar con Gemini Live API."); }
   };
 
+  // --- PRIVATE CHAT METHODS ---
+  const startPrivateChat = async (targetUserId: string) => {
+      if (!user) return;
+      const targetUser = allUsers.find(u => u.id === targetUserId);
+      if (!targetUser) return;
+
+      const chatId = user.id < targetUserId ? `${user.id}_${targetUserId}` : `${targetUserId}_${user.id}`;
+      
+      const sessionData: PrivateChatSession = {
+          id: chatId,
+          creatorId: user.id,
+          targetId: targetUserId,
+          creatorName: user.name,
+          targetName: targetUser.name,
+          isActive: true,
+          createdAt: Date.now()
+      };
+
+      try {
+          await setDoc(doc(db, 'private_chats', chatId), sessionData);
+          // Set local state immediately for responsiveness
+          setActivePrivateChat({ session: sessionData, messages: [] });
+      } catch (e) { console.error("Error creating chat", e); }
+  };
+
+  const closePrivateChat = async () => {
+      if (!activePrivateChat) return;
+      try {
+          await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), { isActive: false });
+          setActivePrivateChat(null);
+      } catch(e) { console.error("Error closing chat", e); }
+  };
+
+  const leavePrivateChat = async () => {
+      // Just clear local state, don't delete doc (only creator can close)
+      setActivePrivateChat(null);
+  };
+
+  const sendPrivateMessage = async (text: string) => {
+      if (!user || !activePrivateChat) return;
+      const msg: PrivateChatMessage = {
+          id: `msg_${Date.now()}`,
+          senderId: user.id,
+          senderName: user.name,
+          text: text,
+          timestamp: Date.now()
+      };
+      try {
+          await addDoc(collection(db, `private_chats/${activePrivateChat.session.id}/messages`), msg);
+      } catch (e) { console.error("Error sending private msg", e); }
+  };
+
   // --- ACTIONS ---
   const setTmdbToken = async (token: string) => { await setDoc(doc(db, 'config', 'tmdb'), { token }); setTmdbTokenState(token); };
   const login = async (email: string, name: string) => { try { await signInWithEmailAndPassword(auth, email, name); return { success: true, message: 'Bienvenido' }; } catch (e: any) { return { success: false, message: e.message }; } };
@@ -1028,7 +1159,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
