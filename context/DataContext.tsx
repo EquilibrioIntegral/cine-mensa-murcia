@@ -1,8 +1,3 @@
-
-
-
-
-
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage, MailboxMessage } from '../types';
 import { auth, db } from '../firebase';

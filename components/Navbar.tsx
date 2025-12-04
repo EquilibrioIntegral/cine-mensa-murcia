@@ -1,8 +1,7 @@
-
 import React, { useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState } from '../types';
-import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Search, Home, Bug, Bell, ShoppingBag, Gamepad2, Mail } from 'lucide-react';
+import { Film, Trophy, Sparkles, LogOut, ListVideo, Shield, Ticket, Home, Bug, ShoppingBag, Gamepad2, Mail } from 'lucide-react';
 import RankBadge from './RankBadge';
 
 const Navbar: React.FC = () => {
@@ -115,12 +114,11 @@ const Navbar: React.FC = () => {
         {notification && (
             <div className="fixed top-20 right-4 z-[100] animate-slide-in-right">
                 <div className={`p-4 rounded-xl border shadow-2xl flex items-center gap-3 ${notification.type === 'level' ? 'bg-gradient-to-r from-cine-gold to-yellow-600 text-black border-yellow-400' : notification.type === 'shop' ? 'bg-black text-cine-gold border-cine-gold' : 'bg-gray-800 text-white border-cine-gold'}`}>
-                    <div className={`p-2 rounded-full ${notification.type === 'level' ? 'bg-black text-cine-gold' : 'bg-cine-gold text-black'}`}>
-                        {notification.type === 'level' ? <Trophy size={20}/> : notification.type === 'shop' ? <ShoppingBag size={20}/> : <Bell size={20}/>}
+                    <div className={`p-2 rounded-full ${notification.type === 'level' ? 'bg-black/20 text-white' : 'bg-cine-gold/20 text-cine-gold'}`}>
+                        {notification.type === 'level' ? <Trophy size={20} /> : notification.type === 'shop' ? <ShoppingBag size={20}/> : <Ticket size={20}/>}
                     </div>
                     <div>
-                        <h4 className="font-bold uppercase text-xs tracking-wider">{notification.type === 'level' ? '¡NIVEL SUBIDO!' : notification.type === 'shop' ? '¡TAQUILLA!' : '¡MISIÓN COMPLETADA!'}</h4>
-                        <p className="text-sm font-bold">{notification.message}</p>
+                        <p className="font-bold text-sm">{notification.message}</p>
                     </div>
                 </div>
             </div>

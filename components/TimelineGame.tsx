@@ -1,11 +1,9 @@
 
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LevelChallenge, Movie } from '../types';
 import { useData } from '../context/DataContext';
 import { generateTimelineScenes } from '../services/geminiService';
-import { getImageUrl } from '../services/tmdbService';
-import { Loader2, ArrowUp, ArrowDown, CheckCircle, XCircle, Film, ShoppingBag, ArrowLeft, Trophy } from 'lucide-react';
+import { Loader2, ArrowDown, CheckCircle, XCircle, Film, ShoppingBag, ArrowLeft, Trophy, AlertTriangle, Plus, Heart } from 'lucide-react';
 
 interface TimelineGameProps {
   challenge: LevelChallenge;
@@ -13,219 +11,245 @@ interface TimelineGameProps {
   onClose: () => void;
 }
 
-// Draggable Item Component
-const SceneCard = ({ scene, index, total, moveScene, isChecking, isCorrect }: any) => {
-    return (
-        <div className="flex items-center gap-4 group">
-            {/* Index Indicator (Film Sprocket Style) */}
-            <div className="hidden md:flex flex-col gap-1 opacity-30 group-hover:opacity-60 transition-opacity">
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
-            </div>
+// --- HELPER: Image URL Generator ---
+const getSceneImageUrl = (movieTitle: string, description: string) => {
+    const visualPrompt = `cinematic movie shot from ${movieTitle}: ${description}, photorealistic, 4k, movie scene`;
+    return `https://image.pollinations.ai/prompt/${encodeURIComponent(visualPrompt)}?width=400&height=225&model=flux-realism&nologo=true`;
+};
 
-            {/* The Card */}
-            <div className={`flex-grow bg-black/80 backdrop-blur-md border-2 p-4 rounded-xl relative transition-all duration-300 ${isChecking ? (isCorrect ? 'border-green-500 bg-green-900/20' : 'border-red-500 bg-red-900/20') : 'border-gray-700 hover:border-cine-gold cursor-grab active:cursor-grabbing'}`}>
-                {/* Visual Connector Line */}
-                {index < total - 1 && (
-                    <div className="absolute left-1/2 -bottom-6 w-0.5 h-6 bg-gray-600 -ml-0.5 z-0 hidden md:block"></div>
-                )}
-                
-                <div className="flex justify-between items-center relative z-10">
-                    <p className="text-gray-200 text-sm md:text-base font-medium leading-tight">
+// --- SUBCOMPONENT: Placed Card (Timeline Item) ---
+const TimelineCard = ({ scene, movieTitle }: { scene: any, movieTitle: string }) => {
+    // We assume image is already cached by browser from the "Draw" phase
+    const imageUrl = getSceneImageUrl(movieTitle, scene.description);
+
+    return (
+        <div className="flex flex-col items-center animate-scale-in w-32 md:w-44 flex-shrink-0 group select-none mx-1">
+            <div className="w-full bg-gray-900 rounded-lg border-2 border-gray-600 overflow-hidden shadow-lg group-hover:border-cine-gold transition-all flex flex-col h-full">
+                <div className="w-full h-20 md:h-28 relative flex-shrink-0">
+                    <img 
+                        src={imageUrl} 
+                        alt="Scene" 
+                        className="w-full h-full object-cover"
+                    />
+                </div>
+                <div className="bg-black p-2 border-t border-gray-700 flex-grow flex items-center justify-center min-h-[4rem]">
+                    <p className="text-[10px] md:text-xs text-gray-300 leading-tight text-center font-medium">
                         {scene.description}
                     </p>
-                    
-                    {!isChecking && (
-                        <div className="flex flex-col gap-1 ml-4">
-                            <button 
-                                onClick={() => moveScene(index, -1)} 
-                                disabled={index === 0}
-                                className="p-1 hover:bg-white/20 rounded disabled:opacity-20 transition-colors"
-                            >
-                                <ArrowUp size={16} />
-                            </button>
-                            <button 
-                                onClick={() => moveScene(index, 1)} 
-                                disabled={index === total - 1}
-                                className="p-1 hover:bg-white/20 rounded disabled:opacity-20 transition-colors"
-                            >
-                                <ArrowDown size={16} />
-                            </button>
-                        </div>
-                    )}
-                    
-                    {isChecking && (
-                        <div className="ml-4">
-                            {isCorrect ? <CheckCircle className="text-green-500" /> : <XCircle className="text-red-500" />}
-                        </div>
-                    )}
                 </div>
             </div>
-            
-            <div className="hidden md:flex flex-col gap-1 opacity-30 group-hover:opacity-60 transition-opacity">
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
-                <div className="w-4 h-3 bg-white rounded-sm"></div>
+            {/* Visual connector line for timeline */}
+            <div className="w-full h-1 bg-gray-700 mt-2 rounded-full relative">
+                <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-gray-500 rounded-full transform -translate-x-1/2 -translate-y-1/2"></div>
             </div>
         </div>
     );
 };
 
+// --- SUBCOMPONENT: Drop Zone ---
+const DropZone = ({ onClick, disabled }: { onClick: () => void, disabled: boolean }) => {
+    return (
+        <button 
+            onClick={onClick}
+            disabled={disabled}
+            className="group flex flex-col items-center justify-center w-8 md:w-12 mx-1 md:mx-2 transition-all flex-shrink-0 h-40 md:h-52 opacity-70 hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+            <div className="w-8 h-8 rounded-full bg-gray-800 border-2 border-gray-600 flex items-center justify-center group-hover:bg-cine-gold group-hover:border-cine-gold group-hover:scale-125 transition-all shadow-lg z-10">
+                <Plus size={16} className="text-gray-400 group-hover:text-black" />
+            </div>
+            <div className="h-full w-0.5 bg-gray-700 group-hover:bg-cine-gold/50 mt-2 transition-colors rounded-full"></div>
+        </button>
+    );
+};
+
 const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onClose }) => {
     const { movies, user } = useData();
-    const [gameState, setGameState] = useState<'intro' | 'loading' | 'playing' | 'checking' | 'success' | 'fail' | 'complete'>('intro');
-    const [round, setRound] = useState(1);
-    const [moviesToPlay, setMoviesToPlay] = useState<Movie[]>([]);
-    const [scenes, setScenes] = useState<{id: number, description: string}[]>([]);
-    const [backgroundUrl, setBackgroundUrl] = useState('');
+    
+    // Game Flow States
+    const [gameState, setGameState] = useState<'intro' | 'setup' | 'playing' | 'result' | 'error'>('intro');
     const [loadingText, setLoadingText] = useState('');
+    
+    // Logic Data
+    const [moviesToPlay, setMoviesToPlay] = useState<Movie[]>([]);
+    const [currentMovieIndex, setCurrentMovieIndex] = useState(0);
+    const [scenesDeck, setScenesDeck] = useState<any[]>([]);
+    const [timeline, setTimeline] = useState<any[]>([]);
+    const [currentCard, setCurrentCard] = useState<any>(null);
+    const [cardImageLoading, setCardImageLoading] = useState(false);
+    
+    // Score & Feedback
+    const [lives, setLives] = useState(3);
+    const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
+    const [streak, setStreak] = useState(0); // Completed movies without failing
 
-    const TOTAL_ROUNDS = 3;
+    const TOTAL_MOVIES = 3;
 
-    // Pick 3 random movies on mount
+    // --- INIT ---
     useEffect(() => {
         if (!user) return;
         
         let pool = movies.filter(m => user.watchedMovies.includes(m.id));
-        
-        // ADMIN FALLBACK: If admin doesn't have enough watched movies, use ANY movies from DB
+        // Admin fallback
         if (user.isAdmin && pool.length < 3) {
-            // Get movies NOT in watched list to fill the gap
             const extras = movies.filter(m => !user.watchedMovies.includes(m.id));
             pool = [...pool, ...extras];
         }
 
-        // If we still don't have enough (database empty?), we can't play
         if (pool.length < 3) {
-            // This case handles rare empty DB scenario
+            // Not enough movies logic handled in parent usually, but safe guard here
             return; 
         }
 
-        // Shuffle and pick 3
         const shuffled = [...pool].sort(() => 0.5 - Math.random());
-        setMoviesToPlay(shuffled.slice(0, 3));
+        setMoviesToPlay(shuffled.slice(0, TOTAL_MOVIES));
     }, []);
 
-    const startRound = async () => {
-        setGameState('loading');
-        setLoadingText(`Buscando rollos de película... (${round}/${TOTAL_ROUNDS})`);
-        
-        const currentMovie = moviesToPlay[round - 1];
-        if (!currentMovie) {
-            onClose();
-            return;
-        }
-        setBackgroundUrl(currentMovie.backdropUrl || '');
+    // --- GAME LOGIC ---
+
+    const startMovie = async () => {
+        setGameState('setup');
+        setLoadingText(`Revisando guion de "${moviesToPlay[currentMovieIndex].title}"...`);
+        setTimeline([]);
+        setScenesDeck([]);
+        setCurrentCard(null);
+        setFeedback(null);
 
         try {
-            const generatedScenes = await generateTimelineScenes(currentMovie.title);
+            const movie = moviesToPlay[currentMovieIndex];
+            const rawScenes = await generateTimelineScenes(movie.title);
             
-            if (generatedScenes.length < 5) {
-                // Fallback or retry logic could go here, for now just skip/fail gracefully
-                throw new Error("Not enough scenes generated");
-            }
+            if (!rawScenes || rawScenes.length < 5) throw new Error("Not enough scenes");
 
-            // Shuffle scenes for the player
-            const shuffledScenes = [...generatedScenes].sort(() => 0.5 - Math.random());
-            setScenes(shuffledScenes);
+            // 1. Shuffle deck
+            const deck = [...rawScenes].sort(() => 0.5 - Math.random());
+            
+            // 2. Take first card and place it on timeline immediately (Starter card)
+            const starter = deck.pop();
+            
+            // Preload starter image
+            const starterImg = new Image();
+            starterImg.src = getSceneImageUrl(movie.title, starter.description);
+            
+            setTimeline([starter]);
+            setScenesDeck(deck);
+            
+            // Start drawing
             setGameState('playing');
+            drawNextCard(deck);
 
         } catch (e) {
-            console.error("Timeline error", e);
-            // In a real app, maybe pick another movie or show error
-            onClose(); 
+            console.error(e);
+            setGameState('error');
         }
     };
 
-    const moveScene = (index: number, direction: number) => {
-        const newScenes = [...scenes];
-        const targetIndex = index + direction;
+    const drawNextCard = (currentDeck: any[]) => {
+        if (currentDeck.length === 0) {
+            handleMovieComplete();
+            return;
+        }
+
+        const next = currentDeck.pop();
+        setScenesDeck([...currentDeck]); // Update deck state
+        setCurrentCard(next);
         
-        // Swap
-        const temp = newScenes[index];
-        newScenes[index] = newScenes[targetIndex];
-        newScenes[targetIndex] = temp;
-        
-        setScenes(newScenes);
+        // Load Image
+        setCardImageLoading(true);
+        const img = new Image();
+        img.src = getSceneImageUrl(moviesToPlay[currentMovieIndex].title, next.description);
+        img.onload = () => setCardImageLoading(false);
+        img.onerror = () => setCardImageLoading(false);
     };
 
-    const checkOrder = () => {
-        setGameState('checking');
+    const handlePlaceCard = (insertIndex: number) => {
+        if (feedback) return; // Prevent double clicks during anim
+
+        // VALIDATION LOGIC
+        // Card is correct if:
+        // 1. Previous card (if exists) has ID < current.ID
+        // 2. Next card (if exists) has ID > current.ID
         
-        // 1. Create the perfect sorted order based on IDs (correct chronological order)
-        const sorted = [...scenes].sort((a, b) => a.id - b.id);
+        const prevCard = insertIndex > 0 ? timeline[insertIndex - 1] : null;
+        const nextCard = insertIndex < timeline.length ? timeline[insertIndex] : null;
+        
+        const isAfterPrev = prevCard ? prevCard.id < currentCard.id : true;
+        const isBeforeNext = nextCard ? nextCard.id > currentCard.id : true;
+        
+        const isCorrect = isAfterPrev && isBeforeNext;
 
-        // 2. Count how many items are NOT in their correct sorted position index
-        let mistakes = 0;
-        scenes.forEach((scene, index) => {
-            if (scene.id !== sorted[index].id) {
-                mistakes++;
-            }
-        });
-
-        // 3. Determine Success: Allow up to 2 positional errors.
-        // Swapping two adjacent cards creates 2 positional errors (e.g., A is in B's spot, B is in A's spot).
-        // So mistakes <= 2 essentially means "One move wrong allowed".
-        const passed = mistakes <= 2;
-
-        setTimeout(() => {
-            if (passed) {
-                if (round < TOTAL_ROUNDS) {
-                    setGameState('success');
-                } else {
-                    setGameState('complete');
-                }
+        if (isCorrect) {
+            setFeedback('correct');
+            // Add to timeline visually
+            const newTimeline = [...timeline];
+            newTimeline.splice(insertIndex, 0, currentCard);
+            setTimeline(newTimeline);
+            
+            setTimeout(() => {
+                setFeedback(null);
+                drawNextCard([...scenesDeck]);
+            }, 1000);
+        } else {
+            setFeedback('wrong');
+            setLives(l => l - 1);
+            
+            if (lives <= 1) {
+                setTimeout(() => setGameState('result'), 1500); // Game Over
             } else {
-                setGameState('fail');
+                // Auto-place it correctly or discard?
+                // Mechanics choice: Timeline usually discards. But to learn, let's place it correctly but lose a life.
+                // Find correct spot
+                const correctIndex = timeline.findIndex(c => c.id > currentCard.id);
+                const finalIndex = correctIndex === -1 ? timeline.length : correctIndex;
+                
+                const newTimeline = [...timeline];
+                newTimeline.splice(finalIndex, 0, currentCard);
+                setTimeline(newTimeline);
+
+                setTimeout(() => {
+                    setFeedback(null);
+                    drawNextCard([...scenesDeck]);
+                }, 1500);
             }
-        }, 1500);
+        }
     };
 
-    const handleNextRound = () => {
-        setRound(r => r + 1);
-        startRound();
+    const handleMovieComplete = () => {
+        if (currentMovieIndex < TOTAL_MOVIES - 1) {
+            setStreak(s => s + 1);
+            setCurrentMovieIndex(idx => idx + 1);
+            setTimeout(startMovie, 1000);
+        } else {
+            setStreak(s => s + 1);
+            setGameState('result'); // Win
+        }
     };
 
-    const handleFinish = (action: 'close' | 'shop') => {
-        onComplete(3, true, action); // 3 rounds passed
-    };
-
-    // --- VIEWS ---
+    // --- RENDERS ---
 
     if (gameState === 'intro') {
         return (
             <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
-                <div className="max-w-2xl w-full">
-                    <Film size={64} className="text-cine-gold mx-auto mb-6 animate-pulse"/>
-                    <h1 className="text-3xl md:text-5xl font-black text-white mb-6 uppercase tracking-wider">
-                        {challenge.title}
-                    </h1>
-                    <p className="text-lg text-gray-300 mb-8 italic font-serif leading-relaxed">
-                        "{challenge.synopsis}"
-                    </p>
-                    <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 mb-8 inline-block text-left">
-                        <p className="text-gray-300 font-bold mb-2 text-sm uppercase tracking-wide">Misión:</p>
-                        <ul className="text-sm text-gray-400 space-y-2">
-                            <li>• Ordena cronológicamente 10 escenas.</li>
-                            <li>• Completa 3 películas.</li>
-                            <li>• <span className="text-green-400 font-bold">Se permite 1 pequeño fallo por película.</span></li>
-                        </ul>
-                    </div>
-                    <div>
-                        <button 
-                            onClick={startRound}
-                            className="bg-cine-gold hover:bg-white text-black font-black text-lg py-4 px-12 rounded-full shadow-[0_0_30px_rgba(212,175,55,0.6)] hover:scale-105 transition-all uppercase tracking-widest"
-                        >
-                            Entrar al Taller
-                        </button>
-                    </div>
+                <Film size={64} className="text-cine-gold mb-6 animate-pulse"/>
+                <h1 className="text-4xl font-black text-white mb-4 uppercase tracking-widest">{challenge.title}</h1>
+                <p className="text-gray-300 max-w-md mx-auto mb-8 leading-relaxed italic">"{challenge.synopsis}"</p>
+                
+                <div className="bg-gray-800/50 p-6 rounded-xl border border-gray-700 mb-8 text-left max-w-sm mx-auto">
+                    <h4 className="text-cine-gold font-bold mb-3 text-sm uppercase">Instrucciones:</h4>
+                    <ul className="text-sm text-gray-300 space-y-2">
+                        <li className="flex items-center gap-2"><ArrowDown size={14}/> Saca una carta de escena.</li>
+                        <li className="flex items-center gap-2"><ArrowDown size={14}/> Colócala en el orden cronológico correcto.</li>
+                        <li className="flex items-center gap-2"><Heart size={14} className="text-red-500"/> Tienes {lives} vidas para completar 3 películas.</li>
+                    </ul>
                 </div>
+
+                <button onClick={startMovie} className="bg-cine-gold hover:bg-white text-black font-black text-lg py-4 px-12 rounded-full shadow-[0_0_30px_rgba(212,175,55,0.6)] hover:scale-105 transition-all uppercase tracking-widest">
+                    ¡Acción!
+                </button>
             </div>
         );
     }
 
-    if (gameState === 'loading') {
+    if (gameState === 'setup') {
         return (
             <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4">
                 <Loader2 size={48} className="text-cine-gold animate-spin mb-4" />
@@ -234,126 +258,109 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
         );
     }
 
-    if (gameState === 'complete') {
+    if (gameState === 'result') {
+        const passed = lives > 0;
         return (
             <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
-                <div className="max-w-md w-full bg-cine-gray rounded-2xl border border-cine-gold p-8 shadow-2xl relative overflow-hidden">
-                    <div className="absolute inset-0 bg-green-900/20"></div>
+                <div className="max-w-md w-full bg-cine-gray rounded-2xl border border-gray-700 p-8 shadow-2xl relative overflow-hidden">
+                    <div className={`absolute inset-0 ${passed ? 'bg-green-900/20' : 'bg-red-900/20'}`}></div>
                     <div className="relative z-10">
-                        <Trophy size={64} className="text-cine-gold mx-auto mb-6 animate-bounce" />
-                        <h2 className="text-3xl font-black text-white mb-2 uppercase">¡PROYECTOR CONSEGUIDO!</h2>
-                        <p className="text-gray-300 mb-6">Has demostrado tener un ojo clínico para el montaje. Tu amigo te regala el proyector y los créditos prometidos.</p>
+                        {passed ? <Trophy size={64} className="text-cine-gold mx-auto mb-6 animate-bounce" /> : <AlertTriangle size={64} className="text-red-500 mx-auto mb-6" />}
+                        <h2 className="text-3xl font-black text-white mb-2 uppercase">{passed ? '¡CORTE FINAL!' : '¡PRODUCCIÓN CANCELADA!'}</h2>
+                        <p className="text-gray-300 mb-6">{passed ? 'Has montado la trilogía perfectamente.' : 'Demasiados errores de continuidad. El director está furioso.'}</p>
                         
-                        <div className="bg-black/40 p-4 rounded-lg border border-cine-gold/30 mb-6">
-                            <p className="text-gray-400 text-xs font-bold uppercase mb-1">Recompensas</p>
-                            <p className="text-2xl font-black text-cine-gold">+{challenge.rewardCredits} Créditos</p>
-                            <p className="text-green-400 text-xs font-bold mt-1">¡NIVEL 3 DESBLOQUEADO!</p>
-                        </div>
+                        {passed && (
+                            <div className="bg-black/40 p-4 rounded-lg border border-cine-gold/30 mb-6">
+                                <p className="text-gray-400 text-xs font-bold uppercase mb-1">Recompensa</p>
+                                <p className="text-2xl font-black text-cine-gold">+{challenge.rewardCredits} Créditos</p>
+                            </div>
+                        )}
 
-                        <div className="space-y-3">
-                            <button onClick={() => handleFinish('shop')} className="w-full bg-cine-gold text-black font-bold py-3 rounded-lg hover:bg-white transition-colors uppercase flex items-center justify-center gap-2 shadow-lg">
-                                <ShoppingBag size={18}/> Ir a la Tienda
-                            </button>
-                            <button onClick={() => handleFinish('close')} className="w-full bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors uppercase flex items-center justify-center gap-2">
-                                <ArrowLeft size={18}/> Volver al Arcade
-                            </button>
+                        <div className="flex gap-4 justify-center">
+                            {passed ? (
+                                <button onClick={() => onComplete(3, true, 'shop')} className="bg-cine-gold text-black font-bold py-3 px-6 rounded-lg uppercase flex items-center gap-2 shadow-lg hover:bg-white transition-colors">
+                                    <ShoppingBag size={18}/> Tienda
+                                </button>
+                            ) : (
+                                <button onClick={onClose} className="bg-gray-700 text-white font-bold py-3 px-6 rounded-lg uppercase hover:bg-gray-600 transition-colors">
+                                    Salir
+                                </button>
+                            )}
+                            {passed && <button onClick={() => onComplete(3, true, 'close')} className="bg-gray-700 text-white font-bold py-3 px-6 rounded-lg uppercase hover:bg-gray-600 transition-colors">Volver</button>}
                         </div>
                     </div>
                 </div>
-            </div>
-        );
-    }
-
-    if (gameState === 'fail') {
-        return (
-            <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
-                <div className="max-w-md w-full bg-cine-gray rounded-2xl border border-red-500 p-8 shadow-2xl">
-                    <XCircle size={64} className="text-red-500 mx-auto mb-6" />
-                    <h2 className="text-2xl font-black text-white mb-2 uppercase">MONTAJE ERRÓNEO</h2>
-                    <p className="text-gray-300 mb-6">"¡Esto no tiene sentido! La historia no encaja." - Tu amigo el montador.</p>
-                    <div className="flex gap-4">
-                        <button onClick={onClose} className="flex-1 bg-gray-700 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-colors">Salir</button>
-                        <button onClick={() => { setRound(1); startRound(); }} className="flex-1 bg-white text-black font-bold py-3 rounded-lg hover:bg-gray-200 transition-colors">Reintentar</button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    if (gameState === 'success') {
-        return (
-            <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4 animate-fade-in text-center">
-                <CheckCircle size={64} className="text-green-500 mx-auto mb-6 animate-pulse" />
-                <h2 className="text-2xl font-black text-white mb-2 uppercase">¡ROLLO COMPLETADO!</h2>
-                <p className="text-gray-300 mb-6">Película {round} de {TOTAL_ROUNDS} montada correctamente.</p>
-                <button 
-                    onClick={handleNextRound}
-                    className="bg-cine-gold text-black font-bold py-3 px-8 rounded-full hover:bg-white transition-colors uppercase tracking-widest shadow-lg"
-                >
-                    Siguiente Película
-                </button>
             </div>
         );
     }
 
     // PLAYING STATE
-    const currentMovie = moviesToPlay[round - 1];
-
-    // Create a sorted copy to visually check against in the render (for the check circles)
-    const sortedForCheck = [...scenes].sort((a, b) => a.id - b.id);
+    const currentMovie = moviesToPlay[currentMovieIndex];
+    const imageUrl = currentCard ? getSceneImageUrl(currentMovie.title, currentCard.description) : '';
 
     return (
-        <div className="fixed inset-0 z-[70] bg-black flex flex-col overflow-hidden">
-            {/* Background */}
-            <div className="absolute inset-0 z-0">
-                {backgroundUrl && (
-                    <img src={backgroundUrl} className="w-full h-full object-cover opacity-60 blur-[2px] transition-opacity duration-1000" alt="Background" />
-                )}
-                {/* Lighter gradient to make image more visible */}
-                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/60 to-black"></div>
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+            {/* Top Bar */}
+            <div className="bg-black/80 p-4 border-b border-gray-800 flex justify-between items-center z-20">
+                <div className="flex items-center gap-4">
+                    <button onClick={onClose} className="text-gray-400 hover:text-white"><ArrowLeft size={24}/></button>
+                    <div>
+                        <h3 className="font-bold text-white text-sm md:text-lg flex items-center gap-2"><Film size={16} className="text-cine-gold"/> {currentMovie.title}</h3>
+                        <p className="text-xs text-gray-500 uppercase">Película {currentMovieIndex + 1} / {TOTAL_MOVIES}</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    {[...Array(3)].map((_, i) => (
+                        <Heart key={i} size={20} fill={i < lives ? "#ef4444" : "none"} className={i < lives ? "text-red-500" : "text-gray-800"} />
+                    ))}
+                </div>
             </div>
 
-            <div className="relative z-10 flex-grow flex flex-col p-4 max-w-2xl mx-auto w-full h-full">
+            {/* Main Area: Card to Play */}
+            <div className="flex-grow flex flex-col items-center justify-center p-4 relative overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
                 
-                {/* Header */}
-                <div className="flex justify-between items-center mb-6">
-                    <div>
-                        <h2 className="text-xl font-bold text-white drop-shadow-md">{currentMovie?.title}</h2>
-                        <p className="text-xs text-cine-gold font-mono uppercase">Película {round} / {TOTAL_ROUNDS}</p>
-                    </div>
-                    <button onClick={onClose} className="text-gray-500 hover:text-white"><XCircle size={24}/></button>
-                </div>
-
-                {/* Timeline Area (Scrollable) */}
-                <div className="flex-grow overflow-y-auto custom-scrollbar pr-2 space-y-4 pb-20">
-                    <div className="text-center text-xs text-gray-500 mb-2 uppercase tracking-widest font-bold">INICIO DE LA PELÍCULA</div>
+                {/* Current Card Stage */}
+                <div className={`transition-all duration-500 transform ${feedback ? 'scale-90 opacity-50' : 'scale-100 opacity-100'} z-10 flex flex-col items-center`}>
+                    <p className="text-cine-gold font-bold uppercase tracking-widest text-xs mb-4 animate-pulse">
+                        {cardImageLoading ? 'REVELANDO FOTOGRAMA...' : 'SIGUIENTE ESCENA'}
+                    </p>
                     
-                    {scenes.map((scene, idx) => (
-                        <SceneCard 
-                            key={scene.id} 
-                            scene={scene}
-                            index={idx}
-                            total={scenes.length}
-                            moveScene={moveScene}
-                            isChecking={gameState === 'checking'}
-                            isCorrect={scene.id === sortedForCheck[idx].id} // Compare against true sorted position
-                        />
-                    ))}
-
-                    <div className="text-center text-xs text-gray-500 mt-2 uppercase tracking-widest font-bold">FINAL DE LA PELÍCULA</div>
+                    <div className="w-64 md:w-80 bg-gray-900 rounded-xl border-4 border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden relative group">
+                        {cardImageLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-20">
+                                <Loader2 size={48} className="text-cine-gold animate-spin" />
+                            </div>
+                        )}
+                        <div className="w-full h-48 md:h-60 relative">
+                            <img src={imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Card" />
+                        </div>
+                        <div className="bg-black/90 p-4 border-t border-gray-700 min-h-[4rem] flex items-center justify-center">
+                            <p className="text-white font-medium text-center text-sm md:text-base leading-snug">"{currentCard?.description}"</p>
+                        </div>
+                        
+                        {/* Feedback Overlay */}
+                        {feedback && (
+                            <div className={`absolute inset-0 flex items-center justify-center backdrop-blur-sm z-30 ${feedback === 'correct' ? 'bg-green-900/40' : 'bg-red-900/40'}`}>
+                                {feedback === 'correct' ? <CheckCircle size={80} className="text-green-500 animate-bounce" /> : <XCircle size={80} className="text-red-500 animate-shake" />}
+                            </div>
+                        )}
+                    </div>
+                    
+                    <p className="text-gray-400 text-xs mt-4 animate-fade-in opacity-80">Selecciona el hueco correcto en la línea de tiempo abajo 👇</p>
                 </div>
+            </div>
 
-                {/* Footer Action */}
-                <div className="mt-4 pt-4 border-t border-gray-800 text-center">
-                    <button 
-                        onClick={checkOrder}
-                        disabled={gameState === 'checking'}
-                        className="w-full bg-cine-gold hover:bg-white text-black font-black py-4 rounded-xl shadow-lg transition-all uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                        {gameState === 'checking' ? <Loader2 className="animate-spin"/> : <CheckCircle size={20}/>}
-                        {gameState === 'checking' ? 'Comprobando montaje...' : 'COMPROBAR MONTAJE'}
-                    </button>
-                </div>
+            {/* Bottom Timeline (Horizontal Scroll) */}
+            <div className="h-64 bg-gray-900/95 border-t border-gray-700 backdrop-blur-md overflow-x-auto flex items-center px-4 md:px-8 gap-0 relative z-20 custom-scrollbar">
+                {/* Start Drop Zone */}
+                <DropZone onClick={() => handlePlaceCard(0)} disabled={!!feedback || cardImageLoading} />
+
+                {timeline.map((scene, idx) => (
+                    <React.Fragment key={scene.id}>
+                        <TimelineCard scene={scene} movieTitle={currentMovie.title} />
+                        <DropZone onClick={() => handlePlaceCard(idx + 1)} disabled={!!feedback || cardImageLoading} />
+                    </React.Fragment>
+                ))}
             </div>
         </div>
     );
