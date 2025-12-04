@@ -1,5 +1,4 @@
 
-
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { ViewState, NewsItem } from '../types';
@@ -82,9 +81,6 @@ const News: React.FC = () => {
   return (
     <div className="container mx-auto px-4 py-8 pb-20 max-w-5xl">
       
-      {/* ONLINE USERS WIDGET (PREMIUM FEATURE) */}
-      {hasOnlineTracker && <OnlineUsersWidget />}
-
       <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-white mb-2">CINE MENSA <span className="text-cine-gold">MURCIA</span></h1>
           <p className="text-gray-400">El punto de encuentro de los cinéfilos exigentes.</p>
@@ -236,8 +232,12 @@ const News: React.FC = () => {
               </div>
           </div>
 
-          {/* RIGHT COLUMN: Changelog / Fixes */}
+          {/* RIGHT COLUMN: Online Radar & Changelog */}
           <div className="space-y-6">
+              
+              {/* ONLINE USERS WIDGET (PREMIUM FEATURE) - Moved Here */}
+              {hasOnlineTracker && <OnlineUsersWidget />}
+
               <div className="bg-black/40 rounded-xl border border-gray-800 overflow-hidden">
                   <div className="p-4 border-b border-gray-800 flex items-center gap-2 bg-cine-gold/5">
                       <CheckCircle className="text-green-500" size={20} />

@@ -1,5 +1,4 @@
 
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieRecommendations, sendChatToGemini } from '../services/geminiService';
@@ -28,6 +27,7 @@ const Recommendations: React.FC = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null); // Ref for auto-focus
   
   // Chat Visuals State (Side Panel)
   const [chatVisuals, setChatVisuals] = useState<{type: 'movie'|'person', data: any}[]>([]);
@@ -36,6 +36,18 @@ const Recommendations: React.FC = () => {
   const [isListeningLegacy, setIsListeningLegacy] = useState(false);
   const [voiceEnabledLegacy, setVoiceEnabledLegacy] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  // --- AUTO FOCUS EFFECT ---
+  // Ensures cursor stays in input box when loading finishes or tab changes
+  useEffect(() => {
+      if (activeTab === 'chat' && !chatLoading) {
+          // Small timeout to allow DOM to update (re-enable input) before focusing
+          const t = setTimeout(() => {
+              inputRef.current?.focus();
+          }, 50);
+          return () => clearTimeout(t);
+      }
+  }, [activeTab, chatLoading]);
 
   // --- LEGACY VOICE HANDLERS (TEXT MODE) ---
   const toggleListeningLegacy = () => {
@@ -299,7 +311,16 @@ const Recommendations: React.FC = () => {
                 <div className="p-4 bg-black/40 border-t border-gray-800">
                     <form onSubmit={handleSendMessage} className="relative flex gap-2">
                         <div className="relative flex-grow">
-                            <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder={isListeningLegacy ? "Escuchando..." : "Escribe o usa el micrófono..."} className={`w-full bg-cine-gray border ${isListeningLegacy ? 'border-red-500' : 'border-gray-700'} rounded-full py-4 pl-6 pr-12 text-white placeholder-gray-500 focus:outline-none focus:border-cine-gold shadow-inner transition-colors`} disabled={chatLoading} />
+                            <input 
+                                ref={inputRef}
+                                type="text" 
+                                value={inputMessage} 
+                                onChange={(e) => setInputMessage(e.target.value)} 
+                                placeholder={isListeningLegacy ? "Escuchando..." : "Escribe o usa el micrófono..."} 
+                                className={`w-full bg-cine-gray border ${isListeningLegacy ? 'border-red-500' : 'border-gray-700'} rounded-full py-4 pl-6 pr-12 text-white placeholder-gray-500 focus:outline-none focus:border-cine-gold shadow-inner transition-colors`} 
+                                disabled={chatLoading} 
+                                autoFocus
+                            />
                             <button type="button" onClick={toggleListeningLegacy} className={`absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-full transition-all ${isListeningLegacy ? 'bg-red-600 text-white animate-pulse' : 'text-gray-400 hover:text-white'}`} title="Dictar por voz">{isListeningLegacy ? <MicOff size={20} /> : <Mic size={20} />}</button>
                         </div>
                         <button type="submit" disabled={!inputMessage.trim() || chatLoading} className="bg-cine-gold text-black p-4 rounded-full hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"><Send size={24} /></button>

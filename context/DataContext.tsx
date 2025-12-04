@@ -84,7 +84,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const userRef = doc(db, 'users', firebaseUser.uid);
               const userSnap = await getDoc(userRef);
               if (userSnap.exists()) {
-                  setUser({ id: userSnap.id, ...userSnap.data() } as User);
+                  const userData = { id: userSnap.id, ...userSnap.data() } as User;
+                  setUser(userData);
+                  // Update Last Seen immediately on load
+                  updateDoc(userRef, { lastSeen: Date.now() });
               }
           } else {
               setUser(null);
@@ -92,6 +95,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       return () => unsubscribe();
   }, []);
+
+  // --- HEARTBEAT FOR ONLINE STATUS ---
+  useEffect(() => {
+      if (!user?.id) return;
+      
+      const interval = setInterval(() => {
+          // Update lastSeen every 2 minutes to stay "Online"
+          updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
+      }, 2 * 60 * 1000); // 2 minutes
+
+      return () => clearInterval(interval);
+  }, [user?.id]);
 
   useEffect(() => {
       if (!user?.id) return;
@@ -182,7 +197,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               level: 1,
               credits: 0,
               completedMissions: [],
-              gamificationStats: {}
+              gamificationStats: {},
+              lastSeen: Date.now()
           };
           await setDoc(doc(db, 'users', res.user.uid), newUser as any);
           return { success: true, message: 'Cuenta creada. Espera aprobación.' };
