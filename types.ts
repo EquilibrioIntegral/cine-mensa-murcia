@@ -77,6 +77,7 @@ export enum ViewState {
   RECOMMENDATIONS,
   ADMIN_PANEL,
   MOVIE_DETAILS,
+  PERSON_DETAILS, // New: Details of Actor/Director
   EVENTS,
   FEEDBACK,
   PROFILE,

@@ -1,3 +1,5 @@
+
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage, MailboxMessage } from '../types';
 import { auth, db } from '../firebase';
@@ -80,6 +82,7 @@ interface DataContextType {
   feedbackList: AppFeedback[];
   currentView: ViewState;
   selectedMovieId: string | null;
+  selectedPersonId: number | null; // NEW: Track selected person for bio view
   tmdbToken: string;
   
   // Logic needed for locking features
@@ -99,7 +102,7 @@ interface DataContextType {
   updateUserProfile: (name: string, avatarUrl: string) => Promise<void>;
   approveUser: (userId: string) => void;
   rejectUser: (userId: string) => void;
-  setView: (view: ViewState, movieId?: string) => void;
+  setView: (view: ViewState, id?: string | number) => void; // Updated signature
   rateMovie: (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => void;
   unwatchMovie: (movieId: string) => Promise<void>;
   toggleWatchlist: (movieId: string) => Promise<void>;
@@ -181,6 +184,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userRatings, setUserRatings] = useState<UserRating[]>([]);
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.LOGIN);
   const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(null);
   const [tmdbToken, setTmdbTokenState] = useState<string>('');
   
   const [activeEvent, setActiveEvent] = useState<CineEvent | null>(null);
@@ -1195,7 +1199,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sendSystemMessage(userId, "¡Bienvenido a Cine Mensa!", "Tu cuenta ha sido aprobada por el administrador. Ya puedes disfrutar de todas las funciones, votar en eventos y completar misiones.", 'system');
   };
   const rejectUser = async (userId: string) => { await updateDoc(doc(db, 'users', userId), { status: 'rejected' }); };
-  const setView = (view: ViewState, movieId?: string) => { setCurrentView(view); if (movieId) setSelectedMovieId(movieId); };
+  const setView = (view: ViewState, id?: string | number) => { 
+      setCurrentView(view); 
+      if (id) {
+          if (typeof id === 'string') {
+              setSelectedMovieId(id);
+              setSelectedPersonId(null);
+          } else {
+              setSelectedPersonId(id);
+              setSelectedMovieId(null);
+          }
+      }
+  };
   const addMovie = async (movie: Movie) => { const existingRef = doc(db, 'movies', movie.id); await setDoc(existingRef, movie); };
   const getMovie = (id: string) => movies.find(m => m.id === id);
   const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => {
@@ -1297,7 +1312,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage, auditQuality
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, selectedPersonId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage, auditQuality
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

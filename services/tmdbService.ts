@@ -1,5 +1,6 @@
 
 
+
 // Service to interact with TMDB API
 
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -43,6 +44,7 @@ export interface TMDBMovieResult {
   poster_path: string;
   backdrop_path?: string;
   overview: string;
+  vote_average?: number; // Optional in some contexts
 }
 
 export interface TMDBPersonResult {
@@ -50,6 +52,17 @@ export interface TMDBPersonResult {
     name: string;
     profile_path: string | null;
     known_for_department: string;
+}
+
+export interface TMDBPersonDetails extends TMDBPersonResult {
+    biography: string;
+    birthday: string | null;
+    deathday: string | null;
+    place_of_birth: string | null;
+    movie_credits: {
+        cast: (TMDBMovieResult & { character: string })[];
+        crew: (TMDBMovieResult & { job: string })[];
+    }
 }
 
 export interface TMDBVideo {
@@ -91,8 +104,8 @@ export interface TMDBMovieDetails extends TMDBMovieResult {
   backdrop_path: string;
   genres: { id: number; name: string }[];
   credits: {
-    crew: { job: string; name: string }[];
-    cast: { name: string; character: string }[];
+    crew: { job: string; name: string; profile_path: string | null; id: number }[];
+    cast: { name: string; character: string; profile_path: string | null; id: number }[];
   };
   videos: {
     results: TMDBVideo[];
@@ -150,6 +163,25 @@ export const searchPersonTMDB = async (query: string, token: string): Promise<TM
     } catch (e) {
         console.error("TMDB Person Search Error:", String(e));
         return [];
+    }
+};
+
+export const getPersonDetails = async (id: number, token: string): Promise<TMDBPersonDetails | null> => {
+    if (!id || !token) return null;
+
+    try {
+        const { url, headers } = getAuthHeadersAndUrl(`/person/${id}`, token, {
+            append_to_response: 'movie_credits,images',
+            language: 'es-ES'
+        });
+
+        const response = await fetch(url, { headers });
+        if (!response.ok) return null;
+
+        return await response.json();
+    } catch (e) {
+        console.error("Person Details Error:", e);
+        return null;
     }
 };
 

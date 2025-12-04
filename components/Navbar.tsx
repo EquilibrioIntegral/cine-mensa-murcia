@@ -53,6 +53,7 @@ const Navbar: React.FC = () => {
                 <NavItem view={ViewState.ARCADE} icon={Gamepad2} label="Retos" />
                 <NavItem view={ViewState.SHOP} icon={ShoppingBag} label="Taquilla" />
                 <NavItem view={ViewState.RECOMMENDATIONS} icon={Sparkles} label="IA" />
+                <NavItem view={ViewState.FEEDBACK} icon={Bug} label="Reportar" />
                 {user?.isAdmin && (
                 <button
                     onClick={() => setView(ViewState.ADMIN_PANEL)}

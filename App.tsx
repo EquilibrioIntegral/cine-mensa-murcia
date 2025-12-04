@@ -1,6 +1,8 @@
 
 
 
+
+
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -11,6 +13,7 @@ import Recommendations from './pages/Recommendations';
 import Watchlist from './pages/Watchlist';
 import AdminPanel from './pages/AdminPanel';
 import MovieDetails from './pages/MovieDetails';
+import PersonDetails from './pages/PersonDetails';
 import Events from './pages/Events';
 import News from './pages/News';
 import Feedback from './pages/Feedback';
@@ -88,6 +91,7 @@ const AppContent: React.FC = () => {
         {currentView === ViewState.WATCHLIST && <Watchlist />}
         {currentView === ViewState.ADMIN_PANEL && <AdminPanel />}
         {currentView === ViewState.MOVIE_DETAILS && <MovieDetails />}
+        {currentView === ViewState.PERSON_DETAILS && <PersonDetails />}
         {currentView === ViewState.EVENTS && <Events />}
         {currentView === ViewState.FEEDBACK && <Feedback />}
         {currentView === ViewState.PROFILE && <Profile />}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil, PlusCircle } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil, PlusCircle, Users } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -124,6 +124,34 @@ const ReviewItem: React.FC<ReviewItemProps> = ({ review, reviewer, currentUser, 
     </div>
   );
 };
+
+// --- HELPER COMPONENT FOR CREW MEMBERS ---
+interface CrewMemberProps {
+    person: { name: string, profile_path: string | null, id: number };
+    role: string;
+    onClick: () => void;
+}
+
+const CrewMember: React.FC<CrewMemberProps> = ({ person, role, onClick }) => (
+    <div 
+        className="flex items-center gap-3 mb-2 cursor-pointer hover:bg-white/5 p-2 rounded-lg transition-colors group"
+        onClick={onClick}
+    >
+        <div className="w-10 h-10 rounded-full bg-gray-800 border border-gray-700 overflow-hidden flex-shrink-0 group-hover:border-cine-gold transition-colors">
+            {person.profile_path ? (
+                <img src={getImageUrl(person.profile_path, 'w200')} alt={person.name} className="w-full h-full object-cover" />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-500 text-[10px] font-bold">
+                    {person.name.charAt(0)}
+                </div>
+            )}
+        </div>
+        <div>
+            <p className="text-sm font-bold text-gray-200 leading-none group-hover:text-cine-gold transition-colors">{person.name}</p>
+            <p className="text-[10px] text-gray-500 uppercase">{role}</p>
+        </div>
+    </div>
+);
 
 const MovieDetails: React.FC = () => {
   const { selectedMovieId, tmdbToken, addMovie, movies, setView, user, toggleWatchlist, rateMovie, unwatchMovie, userRatings, allUsers, toggleReviewVote, liveSession } = useData();
@@ -308,14 +336,21 @@ const MovieDetails: React.FC = () => {
       setShowRatingModal(true);
   };
 
+  const handlePersonClick = (id: number) => {
+      setView(ViewState.PERSON_DETAILS, id);
+  }
+
   if (loading) return <div className="flex justify-center items-center h-[50vh]"><div className="animate-spin text-cine-gold">Cargando...</div></div>;
   if (!details) return <div className="text-center p-10">Película no encontrada</div>;
 
-  // Extract Technical Crew
-  const directors = details.credits.crew.filter(c => c.job === 'Director').map(c => c.name).join(', ');
-  const writers = [...new Set(details.credits.crew.filter(c => ['Screenplay', 'Writer', 'Story', 'Screenstory'].includes(c.job)).map(c => c.name))].join(', ');
-  const music = details.credits.crew.filter(c => ['Original Music Composer', 'Music'].includes(c.job)).map(c => c.name).join(', ');
-  const photography = details.credits.crew.filter(c => ['Director of Photography', 'Cinematography'].includes(c.job)).map(c => c.name).join(', ');
+  // Extract Technical Crew (Objects instead of strings for profile_path)
+  const directors = details.credits.crew.filter(c => c.job === 'Director');
+  const writers = details.credits.crew.filter(c => ['Screenplay', 'Writer', 'Story', 'Screenstory'].includes(c.job)).slice(0, 2); // Limit to top 2
+  const music = details.credits.crew.filter(c => ['Original Music Composer', 'Music'].includes(c.job)).slice(0, 1);
+  const photography = details.credits.crew.filter(c => ['Director of Photography', 'Cinematography'].includes(c.job)).slice(0, 1);
+
+  // Filter unique crew members
+  const uniqueWriters = Array.from(new Map(writers.map(item => [item.name, item])).values()) as typeof writers;
 
   // Trailer Logic
   const trailer = details.videos?.results.find(v => v.site === "YouTube" && v.type === "Trailer" && v.iso_639_1 === "es") 
@@ -542,6 +577,38 @@ const MovieDetails: React.FC = () => {
                   <p className="text-gray-300 leading-relaxed text-lg">{details.overview}</p>
               </section>
 
+              {/* CAST SECTION (VISUAL) */}
+              <section>
+                  <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3 flex items-center gap-2">
+                      <Users size={24}/> Reparto Principal
+                  </h3>
+                  <div className="flex overflow-x-auto pb-6 gap-4 custom-scrollbar">
+                      {details.credits.cast.slice(0, 12).map(actor => (
+                          <div 
+                            key={actor.id} 
+                            onClick={() => handlePersonClick(actor.id)}
+                            className="flex-shrink-0 w-32 group cursor-pointer"
+                          >
+                              <div className="w-32 h-44 rounded-lg overflow-hidden border border-gray-800 bg-gray-900 shadow-md relative group-hover:border-cine-gold transition-colors">
+                                  {actor.profile_path ? (
+                                      <img 
+                                        src={getImageUrl(actor.profile_path, 'w200')} 
+                                        alt={actor.name} 
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                                      />
+                                  ) : (
+                                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 bg-gray-800">
+                                          <Users size={32}/>
+                                      </div>
+                                  )}
+                              </div>
+                              <p className="text-white font-bold text-sm mt-2 leading-tight group-hover:text-cine-gold transition-colors">{actor.name}</p>
+                              <p className="text-gray-500 text-xs italic">{actor.character}</p>
+                          </div>
+                      ))}
+                  </div>
+              </section>
+
               {/* Watch Providers */}
               {providers && (
                   <section>
@@ -581,32 +648,37 @@ const MovieDetails: React.FC = () => {
           {/* Sidebar / Extra Info */}
           <div className="space-y-8">
                
-               {/* Technical Team (New) */}
+               {/* Technical Team (Visual Sidebar) */}
                <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                        <Clapperboard size={18} className="text-cine-gold"/> Ficha Técnica
                    </h3>
                    <div className="space-y-4">
-                        <div>
-                            <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Director</span>
-                            <span className="text-gray-200 font-medium">{directors || 'Desconocido'}</span>
-                        </div>
-                        {writers && (
+                        {directors.length > 0 && (
                             <div>
-                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Guion</span>
-                                <span className="text-gray-200 text-sm">{writers}</span>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-2">Dirección</span>
+                                {directors.map(d => <CrewMember key={d.name} person={d} role="Director" onClick={() => handlePersonClick(d.id)} />)}
                             </div>
                         )}
-                        {music && (
+                        
+                        {uniqueWriters.length > 0 && (
                             <div>
-                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Música</span>
-                                <span className="text-gray-200 text-sm">{music}</span>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-2">Guion</span>
+                                {uniqueWriters.map(w => <CrewMember key={w.name} person={w} role="Guionista" onClick={() => handlePersonClick(w.id)} />)}
                             </div>
                         )}
-                        {photography && (
+
+                        {music.length > 0 && (
                             <div>
-                                <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Fotografía</span>
-                                <span className="text-gray-200 text-sm">{photography}</span>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-2">Música</span>
+                                {music.map(m => <CrewMember key={m.name} person={m} role="Compositor" onClick={() => handlePersonClick(m.id)} />)}
+                            </div>
+                        )}
+
+                        {photography.length > 0 && (
+                            <div>
+                                <span className="block text-xs text-gray-500 uppercase font-bold mb-2">Fotografía</span>
+                                {photography.map(p => <CrewMember key={p.name} person={p} role="Director de Fotografía" onClick={() => handlePersonClick(p.id)} />)}
                             </div>
                         )}
                    </div>
@@ -655,18 +727,6 @@ const MovieDetails: React.FC = () => {
                            </div>
                        )}
                    </div>
-               </div>
-
-               {/* Cast */}
-               <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
-                    <h3 className="text-lg font-bold text-white mb-4">Reparto Principal</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {details.credits.cast.slice(0, 10).map(actor => (
-                            <span key={actor.name} className="bg-black/40 px-3 py-1 rounded-full text-sm text-gray-300 border border-gray-700">
-                                {actor.name} <span className="text-gray-500 text-xs">({actor.character})</span>
-                            </span>
-                        ))}
-                    </div>
                </div>
           </div>
       </div>
