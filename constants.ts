@@ -1,5 +1,8 @@
+
 import { Movie, UserRating, Rank, Mission, User, ShopItem, LevelChallenge } from "./types";
 import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot, MessageCircle } from 'lucide-react';
+
+export const MIN_REVIEW_WORDS = 50;
 
 // Base de datos vacía como solicitado
 export const INITIAL_MOVIES: Movie[] = [];
@@ -223,9 +226,9 @@ export const LEVEL_CHALLENGES: LevelChallenge[] = [
 
 export const RANKS: Rank[] = [
     { id: 'rank_1', title: 'Espectador Novato', minLevel: 1, color: 'text-gray-500', icon: Ticket },
-    { id: 'rank_2', title: 'Proyeccionista de Barrio', minLevel: 2, color: 'text-zinc-400', icon: Film }, // Corrected minLevel to 2 for next set
-    { id: 'rank_3', title: 'Meritorio', minLevel: 5, color: 'text-slate-400', icon: Coffee },
-    { id: 'rank_4', title: 'Auxiliar de Atrezzo', minLevel: 10, color: 'text-blue-400', icon: Armchair },
+    { id: 'rank_2', title: 'Proyeccionista de Barrio', minLevel: 5, color: 'text-zinc-400', icon: Film },
+    { id: 'rank_3', title: 'Meritorio / Ayudante', minLevel: 10, color: 'text-slate-400', icon: Coffee },
+    { id: 'rank_4', title: 'Auxiliar de Atrezzo', minLevel: 15, color: 'text-blue-400', icon: Armchair },
     { id: 'rank_5', title: 'Figurante', minLevel: 20, color: 'text-sky-400', icon: Users },
     { id: 'rank_6', title: 'Actor Secundario', minLevel: 25, color: 'text-cyan-400', icon: UserPlus },
     { id: 'rank_7', title: 'Actor Principal', minLevel: 30, color: 'text-cine-gold', icon: Star },
@@ -241,12 +244,12 @@ export const RANKS: Rank[] = [
 ];
 
 export const MISSIONS: Mission[] = [
-    // --- RANK 1: Espectador Novato (Level 1) ---
+    // --- RANK 1: Espectador Novato (Level 1-4) ---
     // Total XP disponible: ~100
     {
         id: 'm_avatar',
         rankId: 'rank_1',
-        title: 'Nueva Identidad',
+        title: 'Nueva Identidad (Subir a Nivel 2)',
         description: 'Cambia tu avatar por defecto por uno de actor o actriz.',
         xpReward: 10,
         icon: Camera,
@@ -255,7 +258,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_feedback',
         rankId: 'rank_1',
-        title: 'Crítico Constructivo',
+        title: 'Crítico Constructivo (Subir a Nivel 2)',
         description: 'Envía una sugerencia o reporte de bug en la sección de Feedback.',
         xpReward: 10,
         icon: Bug,
@@ -264,7 +267,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_search',
         rankId: 'rank_1',
-        title: 'Buscador de Tesoros',
+        title: 'Buscador de Tesoros (Subir a Nivel 2)',
         description: 'Usa el buscador para encontrar una película en la base de datos.',
         xpReward: 10,
         icon: Search,
@@ -273,7 +276,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_rate',
         rankId: 'rank_1',
-        title: 'Primera Claqueta',
+        title: 'Primera Claqueta (Subir a Nivel 2)',
         description: 'Marca una película como vista y dale una puntuación.',
         xpReward: 15,
         icon: Star,
@@ -282,7 +285,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_watchlist',
         rankId: 'rank_1',
-        title: 'Futuros Proyectos',
+        title: 'Futuros Proyectos (Subir a Nivel 2)',
         description: 'Añade una película a tu lista de pendientes.',
         xpReward: 10,
         icon: ListVideo,
@@ -291,7 +294,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_events',
         rankId: 'rank_1',
-        title: 'Vida Social',
+        title: 'Vida Social (Subir a Nivel 2)',
         description: 'Visita la sección de Eventos/Cineforum.',
         xpReward: 10,
         icon: Ticket,
@@ -300,7 +303,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_ranking',
         rankId: 'rank_1',
-        title: 'Estudiando a los Grandes',
+        title: 'Estudiando a los Grandes (Subir a Nivel 2)',
         description: 'Visita el Ranking de películas y críticos.',
         xpReward: 10,
         icon: Trophy,
@@ -309,7 +312,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_review',
         rankId: 'rank_1',
-        title: 'Pluma Afilada',
+        title: 'Pluma Afilada (Subir a Nivel 2)',
         description: 'Escribe tu primera reseña escrita.',
         xpReward: 15,
         icon: MessageSquare,
@@ -318,18 +321,18 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_ai',
         rankId: 'rank_1',
-        title: 'Consultando al Oráculo',
+        title: 'Consultando al Oráculo (Subir a Nivel 2)',
         description: 'Pide una recomendación de película a la IA.',
         xpReward: 10,
         icon: Sparkles,
         condition: (user) => !!user.gamificationStats?.['use_ai']
     },
 
-    // --- LEVEL 2 TASKS (Attached to Rank 1 but require Level 2) ---
+    // --- LEVEL 2 TASKS (Now part of Rank 1 because Rank 2 starts at Level 5) ---
     {
         id: 'm_lvl2_rate_5',
-        rankId: 'rank_1', // Intentionally attached to Novice rank as "Final Exams"
-        title: 'Crítico en Ciernes (Fase 2)',
+        rankId: 'rank_1', 
+        title: 'Crítico en Ciernes (Subir a Nivel 3)',
         description: 'Valora 5 películas NUEVAS desde que subiste a nivel 2.',
         xpReward: 25,
         icon: Star,
@@ -339,7 +342,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_review_5',
         rankId: 'rank_1',
-        title: 'Columnista (Fase 2)',
+        title: 'Columnista (Subir a Nivel 3)',
         description: 'Escribe reseñas para 5 películas nuevas.',
         xpReward: 30,
         icon: PenTool,
@@ -349,7 +352,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_news',
         rankId: 'rank_1',
-        title: 'Bien Informado (Fase 2)',
+        title: 'Bien Informado (Subir a Nivel 3)',
         description: 'Lee una noticia completa (expandir leer más).',
         xpReward: 10,
         icon: Newspaper,
@@ -359,7 +362,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_ai_chat',
         rankId: 'rank_1',
-        title: 'Futuro Digital (Fase 2)',
+        title: 'Futuro Digital (Subir a Nivel 3)',
         description: 'Usa el chat avanzado o de voz con la IA.',
         xpReward: 15,
         icon: Bot,
@@ -369,7 +372,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_social',
         rankId: 'rank_1',
-        title: 'Espíritu de Equipo (Fase 2)',
+        title: 'Espíritu de Equipo (Subir a Nivel 3)',
         description: 'Da Like o Dislike a 5 reseñas de otros usuarios.',
         xpReward: 20,
         icon: ThumbsUp,
@@ -379,7 +382,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_vote',
         rankId: 'rank_1',
-        title: 'Voto Democrático (Fase 2)',
+        title: 'Voto Democrático (Subir a Nivel 3)',
         description: 'Vota por una película candidata en el Cineforum.',
         xpReward: 15,
         icon: Ticket,
@@ -389,7 +392,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_feedback_5',
         rankId: 'rank_1',
-        title: 'Beta Tester (Fase 2)',
+        title: 'Beta Tester (Subir a Nivel 3)',
         description: 'Envía 5 reportes de bug o ideas de mejora.',
         xpReward: 25,
         icon: Bug,
@@ -399,7 +402,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_lvl2_watchlist_5',
         rankId: 'rank_1',
-        title: 'Agenda Llena (Fase 2)',
+        title: 'Agenda Llena (Subir a Nivel 3)',
         description: 'Ten al menos 5 películas en tu lista de pendientes.',
         xpReward: 10,
         icon: ListVideo,

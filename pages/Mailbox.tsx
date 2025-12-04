@@ -1,8 +1,9 @@
 
+
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Mail, Trash2, CheckCircle, Bell, Info, Shield, ShoppingBag, ChevronDown, ChevronUp, AlertCircle, Inbox } from 'lucide-react';
-import { MailboxMessage } from '../types';
+import { Mail, Trash2, CheckCircle, Bell, Info, Shield, ShoppingBag, ChevronDown, ChevronUp, AlertCircle, Inbox, ArrowRight } from 'lucide-react';
+import { MailboxMessage, ViewState } from '../types';
 
 const MessageIcon = ({ type }: { type: MailboxMessage['type'] }) => {
     switch(type) {
@@ -14,7 +15,7 @@ const MessageIcon = ({ type }: { type: MailboxMessage['type'] }) => {
 }
 
 const Mailbox: React.FC = () => {
-  const { mailbox, markMessageRead, deleteMessage } = useData();
+  const { mailbox, markMessageRead, deleteMessage, setView } = useData();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleToggle = (msg: MailboxMessage) => {
@@ -31,6 +32,11 @@ const Mailbox: React.FC = () => {
   const handleDelete = (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
       deleteMessage(id);
+  };
+
+  const handleAction = (e: React.MouseEvent, movieId: string) => {
+      e.stopPropagation();
+      setView(ViewState.MOVIE_DETAILS, movieId);
   };
 
   return (
@@ -80,10 +86,22 @@ const Mailbox: React.FC = () => {
 
                         {expandedId === msg.id && (
                             <div className="px-4 pb-4 pt-0 text-sm text-gray-300 animate-fade-in border-t border-gray-800 mt-2 bg-black/20">
-                                <div className="pt-4 pb-2 whitespace-pre-wrap leading-relaxed">
+                                <div className="pt-4 pb-4 whitespace-pre-wrap leading-relaxed">
                                     {msg.body}
                                 </div>
-                                <div className="flex justify-end pt-2">
+                                
+                                {msg.actionMovieId && (
+                                    <div className="mb-4">
+                                        <button 
+                                            onClick={(e) => handleAction(e, msg.actionMovieId!)}
+                                            className="bg-cine-gold text-black font-bold px-4 py-2 rounded flex items-center gap-2 hover:bg-white transition-colors"
+                                        >
+                                            Corregir Reseña <ArrowRight size={16}/>
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="flex justify-end pt-2 border-t border-gray-800/50">
                                     <button 
                                         onClick={(e) => handleDelete(e, msg.id)}
                                         className="text-red-400 hover:text-white flex items-center gap-1 text-xs font-bold px-3 py-1 rounded hover:bg-red-900/20 transition-colors"

@@ -64,6 +64,7 @@ export interface UserRating {
   timestamp: number;
   likes?: string[]; // Array of User IDs who liked
   dislikes?: string[]; // Array of User IDs who disliked
+  warningSentAt?: number; // Timestamp when a quality warning was sent
 }
 
 export enum ViewState {
@@ -274,4 +275,5 @@ export interface MailboxMessage {
   timestamp: number;
   read: boolean;
   type: 'system' | 'reward' | 'alert' | 'info';
+  actionMovieId?: string; // Optional: ID of movie to redirect to for edits
 }

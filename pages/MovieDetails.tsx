@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil, PlusCircle } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -620,6 +620,21 @@ const MovieDetails: React.FC = () => {
                        </h3>
                    </div>
                    <div className="max-h-[600px] overflow-y-auto custom-scrollbar">
+                       
+                       {/* MISSING REVIEW CTA - Specific request: If I rated but have no review */}
+                       {userRating && (!userRating.comment && !userRating.spoiler) && (
+                           <div className="p-4 bg-cine-gold/10 border-b border-cine-gold/20 flex flex-col items-center text-center">
+                               <p className="text-sm font-bold text-white mb-2">¡Has votado pero no has opinado!</p>
+                               <p className="text-xs text-gray-400 mb-3">Tu nota está guardada, pero la comunidad quiere leer tu reseña (o tus spoilers).</p>
+                               <button 
+                                   onClick={() => setShowRatingModal(true)}
+                                   className="bg-cine-gold text-black px-4 py-2 rounded-lg font-bold text-sm hover:bg-white transition-colors flex items-center gap-2 w-full justify-center shadow-lg"
+                               >
+                                   <PlusCircle size={16}/> Añadir Reseña / Spoiler
+                               </button>
+                           </div>
+                       )}
+
                        {sortedReviews.length === 0 ? (
                            <div className="p-8 text-center text-gray-500">
                                <p className="italic">Sé el primero en dejar una reseña escrita.</p>

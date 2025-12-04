@@ -335,7 +335,7 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
                             index={idx}
                             total={scenes.length}
                             moveScene={moveScene}
-                            isChecking={gameState === 'checking' || gameState === 'fail' || gameState === 'success'}
+                            isChecking={gameState === 'checking'}
                             isCorrect={scene.id === sortedForCheck[idx].id} // Compare against true sorted position
                         />
                     ))}

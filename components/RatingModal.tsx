@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, EyeOff } from 'lucide-react';
+import { X, Check, EyeOff, AlertCircle } from 'lucide-react';
 import { DetailedRating } from '../types';
+import { MIN_REVIEW_WORDS } from '../constants';
 
 interface RatingModalProps {
   movieTitle: string;
@@ -89,13 +90,25 @@ const RatingModal: React.FC<RatingModalProps> = ({
 
   const average = calculateAverage();
   const isEditing = !!initialRating;
+  // If editing but no previous comment/spoiler, it's effectively adding a review
+  const isAddingReview = isEditing && !initialComment && !initialSpoiler;
+
+  // Validation Logic
+  const words = comment.trim().split(/\s+/).filter(w => w.length > 0);
+  const wordCount = words.length;
+  const hasParagraphs = comment.trim().includes('\n');
+  
+  // If comment is empty, allow submission (rating only). 
+  // If comment has content, enforce rules.
+  const hasContent = wordCount > 0;
+  const isValidLength = !hasContent || (wordCount >= MIN_REVIEW_WORDS && hasParagraphs);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
       <div className="bg-cine-gray w-full max-w-lg rounded-xl border border-gray-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-black/20">
           <h3 className="text-xl font-bold text-white truncate pr-4">
-            {isEditing ? 'Editar Valoración' : 'Valorar'}: {movieTitle}
+            {isAddingReview ? 'Añadir Reseña' : isEditing ? 'Editar Valoración' : 'Valorar'}: {movieTitle}
           </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
             <X size={24} />
@@ -136,15 +149,34 @@ const RatingModal: React.FC<RatingModalProps> = ({
 
           <div className="mb-6 space-y-4">
              <div>
-                 <label className="block text-sm font-bold text-gray-300 uppercase tracking-wide mb-2">
-                   Comentario Público
-                 </label>
+                 <div className="flex justify-between items-end mb-2">
+                     <label className="block text-sm font-bold text-gray-300 uppercase tracking-wide">
+                       Comentario Público
+                     </label>
+                     {hasContent && (
+                         <span className={`text-xs font-bold ${isValidLength ? 'text-green-500' : 'text-red-500'}`}>
+                             {wordCount} / {MIN_REVIEW_WORDS} palabras
+                         </span>
+                     )}
+                 </div>
                  <textarea
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    placeholder="¿Qué te ha parecido?"
-                    className="w-full bg-black/30 border border-gray-600 rounded p-3 text-white h-24 focus:border-cine-gold outline-none"
+                    placeholder={`¿Qué te ha parecido? (Mínimo ${MIN_REVIEW_WORDS} palabras y 2 párrafos)`}
+                    className={`w-full bg-black/30 border rounded p-3 text-white h-32 focus:outline-none transition-colors ${hasContent && !isValidLength ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-cine-gold'}`}
                  />
+                 {hasContent && !isValidLength && (
+                     <div className="mt-2 text-xs text-red-400 bg-red-900/20 p-2 rounded border border-red-900/50 flex items-start gap-2">
+                         <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
+                         <span>
+                             Para publicar una reseña escrita, debes cumplir los estándares de calidad:
+                             <ul className="list-disc pl-4 mt-1 space-y-1">
+                                 <li className={wordCount >= MIN_REVIEW_WORDS ? 'text-green-400' : ''}>Mínimo {MIN_REVIEW_WORDS} palabras</li>
+                                 <li className={hasParagraphs ? 'text-green-400' : ''}>Mínimo 2 párrafos (usa Intro)</li>
+                             </ul>
+                         </span>
+                     </div>
+                 )}
              </div>
              
              <div className="border-t border-gray-700 pt-4">
@@ -181,7 +213,8 @@ const RatingModal: React.FC<RatingModalProps> = ({
              </div>
              <button 
                 type="submit"
-                className="bg-cine-gold text-cine-dark px-8 py-3 rounded-lg font-bold hover:bg-white transition-colors flex items-center gap-2"
+                disabled={!isValidLength}
+                className="bg-cine-gold text-cine-dark px-8 py-3 rounded-lg font-bold hover:bg-white transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
              >
                 <Check size={20} /> {isEditing ? 'Actualizar' : 'Guardar'}
              </button>

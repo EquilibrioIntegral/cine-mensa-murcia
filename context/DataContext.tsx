@@ -1,6 +1,8 @@
 
 
 
+
+
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage, MailboxMessage } from '../types';
 import { auth, db } from '../firebase';
@@ -149,6 +151,7 @@ interface DataContextType {
   // Admin Tools
   resetGamification: () => Promise<void>;
   resetAutomation: () => Promise<void>;
+  auditQuality: () => Promise<number>;
   
   // Trigger Action (for new missions)
   triggerAction: (action: string) => Promise<void>;
@@ -169,7 +172,7 @@ interface DataContextType {
 
   // MAILBOX
   mailbox: MailboxMessage[];
-  sendSystemMessage: (userId: string, title: string, body: string, type?: 'system' | 'reward' | 'alert' | 'info') => Promise<void>;
+  sendSystemMessage: (userId: string, title: string, body: string, type?: 'system' | 'reward' | 'alert' | 'info', actionMovieId?: string) => Promise<void>;
   markMessageRead: (messageId: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
 }
@@ -552,14 +555,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
   };
 
-  const sendSystemMessage = async (userId: string, title: string, body: string, type: 'system' | 'reward' | 'alert' | 'info' = 'system') => {
+  const sendSystemMessage = async (userId: string, title: string, body: string, type: 'system' | 'reward' | 'alert' | 'info' = 'system', actionMovieId?: string) => {
       const msg: MailboxMessage = {
           id: `msg_${Date.now()}_${Math.random()}`,
           title,
           body,
           timestamp: Date.now(),
           read: false,
-          type
+          type,
+          actionMovieId
       };
       try {
           await addDoc(collection(db, `users/${userId}/mailbox`), msg);
@@ -812,6 +816,50 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           bannedTitles: []
       });
       setAutomationStatus({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false }); 
+  };
+
+  // --- QUALITY AUDIT ---
+  const auditQuality = async (): Promise<number> => {
+      let flaggedCount = 0;
+      const batch = writeBatch(db);
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000; // Just as a safe buffer if we were doing time checks
+
+      for (const r of userRatings) {
+          // Check if review has text content
+          if (r.comment && r.comment.length > 0) {
+              const wordCount = r.comment.trim().split(/\s+/).filter(w => w.length > 0).length;
+              const hasParagraphs = r.comment.includes('\n');
+              const isShort = wordCount < 50 || !hasParagraphs;
+
+              // If it fails standards AND hasn't been warned yet
+              if (isShort && !r.warningSentAt) {
+                  // 1. Mark rating as warned
+                  const ratingRef = doc(db, 'ratings', `${r.userId}_${r.movieId}`);
+                  batch.update(ratingRef, { warningSentAt: Date.now() });
+
+                  // 2. Send System Message
+                  const msgRef = doc(collection(db, `users/${r.userId}/mailbox`));
+                  const movieTitle = movies.find(m => m.id === r.movieId)?.title || 'la película';
+                  
+                  batch.set(msgRef, {
+                      id: msgRef.id,
+                      title: "⚠️ Aviso de Calidad: Reseña Corta",
+                      body: `Tu reseña de "${movieTitle}" no cumple con los estándares de calidad del club (mínimo 50 palabras y 2 párrafos). Por favor, edítala o será eliminada en un plazo de 7 días.`,
+                      timestamp: Date.now(),
+                      read: false,
+                      type: 'alert',
+                      actionMovieId: r.movieId
+                  });
+
+                  flaggedCount++;
+              }
+          }
+      }
+
+      if (flaggedCount > 0) {
+          await batch.commit();
+      }
+      return flaggedCount;
   };
 
   useEffect(() => {
@@ -1254,7 +1302,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
 
   const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage
+    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage, auditQuality
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

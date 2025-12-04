@@ -1,7 +1,9 @@
 
+
+
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw, FileText } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw, FileText, CheckCircle } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
 
@@ -59,7 +61,7 @@ const NewsItemRow: React.FC<{ item: any, onDelete: (id: string) => Promise<void>
 };
 
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, deleteNews, news, resetGamification, resetAutomation, automationStatus } = useData();
+  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, deleteNews, news, resetGamification, resetAutomation, automationStatus, auditQuality } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -72,6 +74,10 @@ const AdminPanel: React.FC = () => {
   const [newsImageUrl, setNewsImageUrl] = useState('');
   const [newsSent, setNewsSent] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+
+  // Audit State
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditResult, setAuditResult] = useState<string | null>(null);
 
   // Manual Update State (Feedback Tab)
   const [updateDraft, setUpdateDraft] = useState('');
@@ -232,6 +238,19 @@ const AdminPanel: React.FC = () => {
       if (confirm) {
           await resetAutomation();
           alert("Sistema reseteado. Recarga la página para forzar el trigger.");
+      }
+  }
+
+  const handleAudit = async () => {
+      setIsAuditing(true);
+      setAuditResult(null);
+      try {
+          const count = await auditQuality();
+          setAuditResult(`Auditoría completada. Se han enviado ${count} avisos de corrección a usuarios.`);
+      } catch(e) {
+          setAuditResult("Error durante la auditoría.");
+      } finally {
+          setIsAuditing(false);
       }
   }
 
@@ -509,6 +528,25 @@ const AdminPanel: React.FC = () => {
                     <button onClick={handleSaveToken} className="bg-cine-gold text-black font-bold px-6 rounded">Guardar</button>
                   </div>
                   {saveMessage && <p className={`mt-2 ${saveMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>{saveMessage.text}</p>}
+              </div>
+
+              {/* QUALITY CONTROL */}
+              <div className="bg-cine-gray p-6 rounded-xl border border-gray-800">
+                  <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><CheckCircle size={20} className="text-green-500" /> Control de Calidad</h3>
+                  <p className="text-gray-400 text-sm mb-4">
+                      Revisar reseñas antiguas que no cumplen los nuevos estándares (mínimo 50 palabras y 2 párrafos) y enviar avisos automáticos a los autores.
+                  </p>
+                  <button 
+                    onClick={handleAudit}
+                    disabled={isAuditing}
+                    className="bg-green-700 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                      {isAuditing ? <Loader2 className="animate-spin" size={18}/> : <Shield size={18}/>}
+                      {isAuditing ? 'Auditando...' : 'Auditar Reseñas Cortas'}
+                  </button>
+                  {auditResult && (
+                      <p className="mt-3 text-green-400 font-bold animate-fade-in">{auditResult}</p>
+                  )}
               </div>
 
               {/* DANGER ZONE */}
