@@ -1,8 +1,5 @@
 
 
-
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieRecommendations, sendChatToGemini } from '../services/geminiService';
@@ -31,6 +28,9 @@ const Recommendations: React.FC = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  
+  // Chat Visuals State (Side Panel)
+  const [chatVisuals, setChatVisuals] = useState<{type: 'movie'|'person', data: any}[]>([]);
 
   // Voice State (Legacy Text-to-Speech)
   const [isListeningLegacy, setIsListeningLegacy] = useState(false);
@@ -79,18 +79,39 @@ const Recommendations: React.FC = () => {
   const handleSendMessage = async (e?: React.FormEvent) => {
       e?.preventDefault();
       if (!inputMessage.trim() || chatLoading || !user) return;
+      
       const newUserMsg: ChatMessage = { role: 'user', text: inputMessage };
       setChatHistory(prev => [...prev, newUserMsg]);
       setInputMessage('');
       setChatLoading(true);
+      
       const watched = movies.filter(m => user.watchedMovies.includes(m.id));
       const watchlist = movies.filter(m => user.watchlist.includes(m.id));
+      
       try {
           const response = await sendChatToGemini(chatHistory, newUserMsg.text, watched, watchlist, userRatings, tmdbToken);
-          setChatHistory(prev => [...prev, { role: 'model', text: response.text, relatedMovies: response.movies }]);
+          
+          // Update History
+          setChatHistory(prev => [...prev, { 
+              role: 'model', 
+              text: response.text, 
+              relatedMovies: response.movies,
+              relatedPeople: response.people
+          }]);
+
+          // Update Visual Sidebar
+          const newVisuals: {type: 'movie'|'person', data: any}[] = [];
+          if (response.movies) response.movies.forEach(m => newVisuals.push({ type: 'movie', data: m }));
+          if (response.people) response.people.forEach(p => newVisuals.push({ type: 'person', data: p }));
+          setChatVisuals(newVisuals);
+
           if (voiceEnabledLegacy) speakTextLegacy(response.text);
-          triggerAction('use_ai_chat'); // NEW TRIGGER FOR ADVANCED CHAT MISSION
-      } catch (error) { setChatHistory(prev => [...prev, { role: 'model', text: "Error de comunicación." }]); } finally { setChatLoading(false); }
+          triggerAction('use_ai_chat'); 
+      } catch (error) { 
+          setChatHistory(prev => [...prev, { role: 'model', text: "Error de comunicación." }]); 
+      } finally { 
+          setChatLoading(false); 
+      }
   };
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, chatLoading]);
@@ -248,39 +269,72 @@ const Recommendations: React.FC = () => {
 
       {/* --- CHAT MODE VIEW --- */}
       {activeTab === 'chat' && (
-        <div className="bg-cine-gray rounded-2xl border border-gray-800 overflow-hidden shadow-2xl h-[600px] flex flex-col animate-fade-in relative">
-            <div className="bg-black/40 p-4 border-b border-gray-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cine-gold/20 rounded-full"><Bot className="text-cine-gold" size={24} /></div>
-                    <div><h3 className="text-white font-bold">Asistente Cine Mensa</h3><p className="text-xs text-green-400 flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Online</p></div>
+        <div className="relative">
+            {/* MAIN CHAT WINDOW */}
+            <div className="bg-cine-gray rounded-2xl border border-gray-800 overflow-hidden shadow-2xl h-[600px] flex flex-col animate-fade-in relative">
+                <div className="bg-black/40 p-4 border-b border-gray-800 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-cine-gold/20 rounded-full"><Bot className="text-cine-gold" size={24} /></div>
+                        <div><h3 className="text-white font-bold">Asistente Cine Mensa</h3><p className="text-xs text-green-400 flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Online</p></div>
+                    </div>
+                    <button onClick={() => { const newState = !voiceEnabledLegacy; setVoiceEnabledLegacy(newState); if (!newState) window.speechSynthesis.cancel(); }} className={`p-2 rounded-full transition-colors ${voiceEnabledLegacy ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>{voiceEnabledLegacy ? <Volume2 size={20} /> : <VolumeX size={20} />}</button>
                 </div>
-                <button onClick={() => { const newState = !voiceEnabledLegacy; setVoiceEnabledLegacy(newState); if (!newState) window.speechSynthesis.cancel(); }} className={`p-2 rounded-full transition-colors ${voiceEnabledLegacy ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-400'}`}>{voiceEnabledLegacy ? <Volume2 size={20} /> : <VolumeX size={20} />}</button>
-            </div>
-            <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]">
-                {chatHistory.map((msg, idx) => (
-                    <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                        <div className={`flex gap-3 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                            {msg.role === 'model' && <div className="w-8 h-8 rounded-full bg-cine-gray border border-cine-gold flex items-center justify-center flex-shrink-0 mt-1"><Bot size={16} className="text-cine-gold" /></div>}
-                            {msg.role === 'user' && <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1"><UserIcon size={16} className="text-white" /></div>}
-                            <div className={`rounded-2xl p-4 text-sm leading-relaxed shadow-lg ${msg.role === 'user' ? 'bg-cine-gold text-cine-dark font-medium rounded-tr-none' : 'bg-black/60 text-gray-200 border border-gray-800 rounded-tl-none'}`}>
-                                {msg.text.split('\n').map((line, i) => <p key={i} className="min-h-[1em] mb-1 last:mb-0">{line}</p>)}
+                
+                <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]">
+                    {chatHistory.map((msg, idx) => (
+                        <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                            <div className={`flex gap-3 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                                {msg.role === 'model' && <div className="w-8 h-8 rounded-full bg-cine-gray border border-cine-gold flex items-center justify-center flex-shrink-0 mt-1"><Bot size={16} className="text-cine-gold" /></div>}
+                                {msg.role === 'user' && <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1"><UserIcon size={16} className="text-white" /></div>}
+                                <div className={`rounded-2xl p-4 text-sm leading-relaxed shadow-lg ${msg.role === 'user' ? 'bg-cine-gold text-cine-dark font-medium rounded-tr-none' : 'bg-black/60 text-gray-200 border border-gray-800 rounded-tl-none'}`}>
+                                    {msg.text.split('\n').map((line, i) => <p key={i} className="min-h-[1em] mb-1 last:mb-0">{line}</p>)}
+                                </div>
                             </div>
                         </div>
-                        {msg.relatedMovies && msg.relatedMovies.length > 0 && <div className="mt-4 pl-12 grid grid-cols-2 md:grid-cols-3 gap-3 w-full max-w-[85%]">{msg.relatedMovies.map(movie => <div key={movie.id} className="transform scale-90 origin-top-left"><MovieCard movie={movie} showRatingInput={false} /></div>)}</div>}
-                    </div>
-                ))}
-                {chatLoading && <div className="flex gap-3 justify-start"><div className="w-8 h-8 rounded-full bg-cine-gray border border-cine-gold flex items-center justify-center flex-shrink-0"><Bot size={16} className="text-cine-gold" /></div><div className="bg-black/60 p-4 rounded-2xl rounded-tl-none border border-gray-800 flex items-center gap-2"><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></span></div></div>}
-                <div ref={chatEndRef} />
+                    ))}
+                    {chatLoading && <div className="flex gap-3 justify-start"><div className="w-8 h-8 rounded-full bg-cine-gray border border-cine-gold flex items-center justify-center flex-shrink-0"><Bot size={16} className="text-cine-gold" /></div><div className="bg-black/60 p-4 rounded-2xl rounded-tl-none border border-gray-800 flex items-center gap-2"><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span><span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></span></div></div>}
+                    <div ref={chatEndRef} />
+                </div>
+                
+                <div className="p-4 bg-black/40 border-t border-gray-800">
+                    <form onSubmit={handleSendMessage} className="relative flex gap-2">
+                        <div className="relative flex-grow">
+                            <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder={isListeningLegacy ? "Escuchando..." : "Escribe o usa el micrófono..."} className={`w-full bg-cine-gray border ${isListeningLegacy ? 'border-red-500' : 'border-gray-700'} rounded-full py-4 pl-6 pr-12 text-white placeholder-gray-500 focus:outline-none focus:border-cine-gold shadow-inner transition-colors`} disabled={chatLoading} />
+                            <button type="button" onClick={toggleListeningLegacy} className={`absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-full transition-all ${isListeningLegacy ? 'bg-red-600 text-white animate-pulse' : 'text-gray-400 hover:text-white'}`} title="Dictar por voz">{isListeningLegacy ? <MicOff size={20} /> : <Mic size={20} />}</button>
+                        </div>
+                        <button type="submit" disabled={!inputMessage.trim() || chatLoading} className="bg-cine-gold text-black p-4 rounded-full hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"><Send size={24} /></button>
+                    </form>
+                </div>
             </div>
-            <div className="p-4 bg-black/40 border-t border-gray-800">
-                <form onSubmit={handleSendMessage} className="relative flex gap-2">
-                    <div className="relative flex-grow">
-                        <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder={isListeningLegacy ? "Escuchando..." : "Escribe o usa el micrófono..."} className={`w-full bg-cine-gray border ${isListeningLegacy ? 'border-red-500' : 'border-gray-700'} rounded-full py-4 pl-6 pr-12 text-white placeholder-gray-500 focus:outline-none focus:border-cine-gold shadow-inner transition-colors`} disabled={chatLoading} />
-                        <button type="button" onClick={toggleListeningLegacy} className={`absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-full transition-all ${isListeningLegacy ? 'bg-red-600 text-white animate-pulse' : 'text-gray-400 hover:text-white'}`} title="Dictar por voz">{isListeningLegacy ? <MicOff size={20} /> : <Mic size={20} />}</button>
+
+            {/* SIDE PANEL VISUALS (POP-UP) */}
+            {chatVisuals.length > 0 && (
+                <div className="absolute top-4 right-4 w-64 md:w-72 max-h-[500px] bg-black/80 backdrop-blur-xl border border-cine-gold/30 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50 animate-slide-in-right">
+                    <div className="p-3 bg-black/60 border-b border-gray-700 flex justify-between items-center">
+                        <h4 className="text-cine-gold font-bold text-sm flex items-center gap-2"><Tv size={14}/> Contexto Visual</h4>
+                        <button onClick={() => setChatVisuals([])} className="text-gray-400 hover:text-white"><X size={14}/></button>
                     </div>
-                    <button type="submit" disabled={!inputMessage.trim() || chatLoading} className="bg-cine-gold text-black p-4 rounded-full hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"><Send size={24} /></button>
-                </form>
-            </div>
+                    <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar flex-grow">
+                        {chatVisuals.map((item, idx) => (
+                            <div key={idx} className="animate-fade-in">
+                                {item.type === 'movie' ? (
+                                    <div className="transform scale-90 origin-top-left">
+                                        <MovieCard movie={item.data} showRatingInput={false} />
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center bg-cine-gray p-3 rounded-xl border border-gray-700">
+                                        <div className="w-20 h-20 rounded-full border-2 border-cine-gold overflow-hidden shadow-lg mb-2">
+                                            <img src={getImageUrl(item.data.profile_path, 'w200')} className="w-full h-full object-cover" alt={item.data.name} />
+                                        </div>
+                                        <span className="text-sm font-bold text-white text-center">{item.data.name}</span>
+                                        <span className="text-xs text-gray-500">{item.data.known_for_department}</span>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
       )}
     </div>

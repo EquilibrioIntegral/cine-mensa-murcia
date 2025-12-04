@@ -143,6 +143,7 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   relatedMovies?: Movie[];
+  relatedPeople?: any[]; // TMDBPersonResult[]
 }
 
 // --- NEWS & FEEDBACK TYPES ---

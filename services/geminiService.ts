@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User, TriviaQuestion } from "../types";
-import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
+import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB } from "./tmdbService";
 
 // Initialize the client safely
 const apiKey = process.env.API_KEY || "";
@@ -877,8 +877,8 @@ export const sendChatToGemini = async (
     watchlistMovies: Movie[],
     userRatings: UserRating[],
     tmdbToken: string
-): Promise<{ text: string, movies: Movie[] }> => {
-    if (!isAiAvailable()) return { text: "No puedo conectar con la IA.", movies: [] };
+): Promise<{ text: string, movies: Movie[], people: any[] }> => {
+    if (!isAiAvailable()) return { text: "No puedo conectar con la IA.", movies: [], people: [] };
 
     const watchedContext = watchedMovies.slice(0, 30).map(m => m.title).join(", ");
     
@@ -887,13 +887,17 @@ export const sendChatToGemini = async (
         Usuario ha visto: ${watchedContext}.
         
         Responde a la pregunta del usuario sobre cine.
-        Si recomiendas películas específicas, DEBES incluir un bloque JSON oculto al final de tu respuesta con los títulos y años.
+        
+        IMPORTANTE: Si mencionas películas o personas (actores/directores) específicos, DEBES incluir un bloque JSON oculto al final de tu respuesta con sus datos para que la interfaz pueda mostrar sus imágenes.
         
         Formato de respuesta:
         Texto normal de la respuesta con tu opinión, datos, etc.
         
         \`\`\`json
-        [ { "title": "Peli A", "year": 2000 }, ... ]
+        {
+          "movies": [ { "title": "Peli A", "year": 2000 }, ... ],
+          "people": [ { "name": "Brad Pitt" }, { "name": "Christopher Nolan" }, ... ]
+        }
         \`\`\`
     `;
 
@@ -910,44 +914,63 @@ export const sendChatToGemini = async (
         
         // Extract JSON
         let movies: Movie[] = [];
-        const jsonMatch = text.match(/```json\s*(\[\s*[\s\S]*?\s*\])\s*```/);
+        let people: any[] = [];
+        
+        const jsonMatch = text.match(/```json\s*(\{[\s\S]*?\})\s*```/);
         
         let cleanText = text;
         
         if (jsonMatch) {
             cleanText = text.replace(jsonMatch[0], '').trim();
             try {
-                const rawMovies = JSON.parse(jsonMatch[1]);
-                const promises = rawMovies.map(async (m: any) => {
-                    const tmdb = await findMovieByTitleAndYear(m.title, m.year, tmdbToken);
-                    if (tmdb) {
-                        return {
-                            id: `tmdb-${tmdb.id}`,
-                            tmdbId: tmdb.id,
-                            title: tmdb.title,
-                            year: parseInt(tmdb.release_date?.split('-')[0]) || 0,
-                            posterUrl: getImageUrl(tmdb.poster_path),
-                            rating: tmdb.vote_average,
-                            description: tmdb.overview,
-                            genre: [],
-                            director: "IA",
-                            totalVotes: 0
-                        } as Movie;
-                    }
-                    return null;
-                });
-                const results = await Promise.all(promises);
-                movies = results.filter(m => m !== null) as Movie[];
+                const rawData = JSON.parse(jsonMatch[1]);
+                
+                // Process Movies
+                if (rawData.movies && Array.isArray(rawData.movies)) {
+                    const promises = rawData.movies.map(async (m: any) => {
+                        const tmdb = await findMovieByTitleAndYear(m.title, m.year, tmdbToken);
+                        if (tmdb) {
+                            return {
+                                id: `tmdb-${tmdb.id}`,
+                                tmdbId: tmdb.id,
+                                title: tmdb.title,
+                                year: parseInt(tmdb.release_date?.split('-')[0]) || 0,
+                                posterUrl: getImageUrl(tmdb.poster_path),
+                                rating: tmdb.vote_average,
+                                description: tmdb.overview,
+                                genre: [],
+                                director: "IA",
+                                totalVotes: 0
+                            } as Movie;
+                        }
+                        return null;
+                    });
+                    const results = await Promise.all(promises);
+                    movies = results.filter(m => m !== null) as Movie[];
+                }
+
+                // Process People
+                if (rawData.people && Array.isArray(rawData.people)) {
+                    const promises = rawData.people.map(async (p: any) => {
+                        const results = await searchPersonTMDB(p.name, tmdbToken);
+                        // Take first result with image
+                        const person = results.find(r => r.profile_path) || results[0];
+                        return person || null;
+                    });
+                    const results = await Promise.all(promises);
+                    people = results.filter(p => p !== null);
+                }
+
             } catch (e) {
                 console.error("Chat JSON Error:", String(e));
             }
         }
 
-        return { text: cleanText, movies };
+        return { text: cleanText, movies, people };
 
     } catch (e) {
         console.error("Chat Error:", String(e));
-        return { text: "Error al procesar tu mensaje.", movies: [] };
+        return { text: "Error al procesar tu mensaje.", movies: [], people: [] };
     }
 };
 
