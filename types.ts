@@ -27,6 +27,7 @@ export interface User {
   watchlist: string[]; // Array of Movie IDs
   status: UserStatus;
   isAdmin: boolean;
+  banExpiresAt?: number; // Timestamp for temporary bans
   // Usage tracking for Voice Limits
   voiceUsageDate?: number; // Timestamp of last usage day
   voiceUsageSeconds?: number; // Seconds used today
@@ -42,6 +43,10 @@ export interface User {
   lastGamificationReset?: number; // Admin hard reset timestamp
   lastLevelUpTimestamp?: number; // Timestamp of when the current level was reached
   lastSeen?: number; // Timestamp for online status
+  
+  // TRIVIA STATS
+  triviaHighScore?: number; // Highest score in Survival Mode
+  duelWins?: number; // Total duel wins
 }
 
 export interface DetailedRating {
@@ -111,6 +116,15 @@ export interface EventMessage {
   role?: 'user' | 'moderator' | 'system'; 
 }
 
+export interface MeetupLocation {
+    id: string;
+    name: string;
+    address: string;
+    mapUri: string;
+    proposedBy: string;
+    votes: string[]; // UserIDs
+}
+
 export interface CineEvent {
   id: string;
   themeTitle: string;
@@ -127,8 +141,17 @@ export interface CineEvent {
   winnerTmdbId?: number; // Set after voting ends
   
   // Social Commitment
-  committedViewers?: string[]; // IDs of users who promise to watch
+  committedViewers?: string[]; // IDs of users who promise to watch (Legacy + Union of prefs)
   committedDebaters?: string[]; // IDs of users who promise to attend debate
+  
+  // Detailed Viewing Preferences (New)
+  viewingPreferences?: Record<string, { solo: boolean, group: boolean }>;
+
+  // Physical Meetup Coordination (New)
+  meetupProposal?: {
+      locations: MeetupLocation[];
+      finalizedLocationId?: string;
+  };
   
   // Time Voting (Doodle)
   timeVotes?: Record<string, string[]>; // Key: "Friday_22", Value: Array of UserIDs
@@ -222,11 +245,8 @@ export interface Mission {
     ratingsCount: number, 
     reviewsCount: number, 
     likesReceived: number, 
-    horrorCount: number,
-    actionCount: number,
-    comedyCount: number,
-    dramaCount: number,
-    scifiCount: number
+    likesGiven: number, // NEW
+    feedbackCount: number // NEW
   }) => boolean;
   maxProgress?: number; // For progress bars (e.g., 5/10)
 }
@@ -269,6 +289,28 @@ export interface PrivateChatSession {
     typing?: Record<string, boolean>; // Map of userId -> isTyping
 }
 
+// --- TRIVIA MATCH TYPES (1v1) ---
+export interface TriviaPlayer {
+    id: string;
+    name: string;
+    avatarUrl: string;
+    score: number;
+    hasAnswered: boolean;
+    answerCorrect?: boolean;
+    eliminated?: boolean;
+}
+
+export interface TriviaMatch {
+    id: string;
+    players: Record<string, TriviaPlayer>; // Map userId -> Player
+    currentQuestion: TriviaQuestion | null;
+    round: number;
+    status: 'waiting' | 'playing' | 'round_end' | 'finished';
+    winnerId?: string;
+    createdAt: number;
+    questionStartTime?: number; // For timer sync
+}
+
 // --- MAILBOX TYPES ---
 export interface MailboxMessage {
   id: string;
@@ -278,4 +320,5 @@ export interface MailboxMessage {
   read: boolean;
   type: 'system' | 'reward' | 'alert' | 'info';
   actionMovieId?: string; // Optional: ID of movie to redirect to for edits
+  actionEventId?: string; // Optional: Link to event for coordination
 }

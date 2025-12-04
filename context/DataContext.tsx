@@ -1,1327 +1,761 @@
-
-
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Movie, User, UserRating, ViewState, DetailedRating, CineEvent, EventPhase, EventMessage, AppFeedback, NewsItem, LiveSessionState, Mission, ShopItem, MilestoneEvent, PrivateChatSession, PrivateChatMessage, MailboxMessage } from '../types';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth, db } from '../firebase';
 import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-  updateProfile
-} from "firebase/auth";
+  collection, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, 
+  onSnapshot, query, where, orderBy, arrayUnion, arrayRemove, increment, limit 
+} from 'firebase/firestore';
 import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  updateDoc, 
-  onSnapshot, 
-  arrayUnion,
-  arrayRemove,
-  deleteDoc,
-  query,
-  orderBy,
-  addDoc,
-  limit,
-  where,
-  getCountFromServer,
-  writeBatch,
-  getDocs,
-  deleteField,
-  increment
-} from "firebase/firestore";
-import { decideBestTime, generateCinemaNews } from '../services/geminiService';
-import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
-import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB, searchMoviesTMDB } from '../services/tmdbService';
-import { MISSIONS, XP_TABLE, RANKS } from '../constants';
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, 
+  onAuthStateChanged, sendPasswordResetEmail
+} from 'firebase/auth';
+import { 
+  User, Movie, UserRating, CineEvent, ViewState, NewsItem, AppFeedback, 
+  EventPhase, ChatMessage, MailboxMessage, LiveSessionState, PrivateChatSession,
+  PrivateChatMessage, TriviaMatch, TriviaQuestion, EventCandidate 
+} from '../types';
+import { STARTER_AVATARS } from '../constants';
+import { getMovieDetailsTMDB, getImageUrl } from '../services/tmdbService';
 
-// --- AUDIO UTILS ---
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
+const DataContext = createContext<any>(null);
 
-function createPcmBlob(data: Float32Array): { data: string, mimeType: string } {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    let s = Math.max(-1, Math.min(1, data[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  let binary = '';
-  const bytes = new Uint8Array(int16.buffer);
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return { data: btoa(binary), mimeType: 'audio/pcm;rate=16000' };
-}
+export const useData = () => useContext(DataContext);
 
-// MAX DAILY SECONDS (5 Minutes)
-const DAILY_VOICE_LIMIT_SECONDS = 300; 
-
-// AUTO NEWS CONFIG
-const MAX_DAILY_NEWS = 10;
-const NEWS_INTERVAL_MS = 90 * 60 * 1000; // 90 minutes between auto news
-
-interface DataContextType {
-  user: User | null;
-  allUsers: User[]; 
-  movies: Movie[];
-  userRatings: UserRating[];
-  activeEvent: CineEvent | null;
-  eventMessages: EventMessage[];
-  news: NewsItem[];
-  feedbackList: AppFeedback[];
-  currentView: ViewState;
-  selectedMovieId: string | null;
-  selectedPersonId: number | null; // NEW: Track selected person for bio view
-  tmdbToken: string;
-  
-  // Logic needed for locking features
-  topCriticId: string | null;
-  getRemainingVoiceSeconds: () => number;
-  
-  // Live Session Global State
-  liveSession: LiveSessionState;
-  startLiveSession: (mode: 'general' | 'debate', contextData?: any) => Promise<void>;
-  stopLiveSession: () => void;
-
-  setTmdbToken: (token: string) => Promise<void>;
-  login: (email: string, name: string) => Promise<{ success: boolean; message: string }>; // name unused in login but kept for sig match
-  logout: () => void;
-  register: (email: string, name: string, password: string, avatarUrl?: string) => Promise<{ success: boolean; message: string }>;
-  resetPassword: (email: string) => Promise<{ success: boolean; message: string }>;
-  updateUserProfile: (name: string, avatarUrl: string) => Promise<void>;
-  approveUser: (userId: string) => void;
-  rejectUser: (userId: string) => void;
-  setView: (view: ViewState, id?: string | number) => void; // Updated signature
-  rateMovie: (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => void;
-  unwatchMovie: (movieId: string) => Promise<void>;
-  toggleWatchlist: (movieId: string) => Promise<void>;
-  toggleReviewVote: (targetUserId: string, movieId: string, voteType: 'like' | 'dislike') => void;
-  addMovie: (movie: Movie) => Promise<void>;
-  getMovie: (id: string) => Movie | undefined;
-  
-  createEvent: (eventData: Partial<CineEvent>) => Promise<void>;
-  closeEvent: (eventId: string) => Promise<void>;
-  voteForCandidate: (eventId: string, tmdbId: number) => Promise<void>;
-  transitionEventPhase: (eventId: string, phase: EventPhase, winnerId?: number) => Promise<void>;
-  sendEventMessage: (eventId: string, text: string, role?: 'user' | 'moderator', audioBase64?: string) => Promise<void>;
-  toggleEventCommitment: (eventId: string, type: 'view' | 'debate') => Promise<void>;
-  toggleTimeVote: (eventId: string, timeSlot: string) => Promise<void>;
-
-  // Turn Management
-  raiseHand: (eventId: string) => Promise<void>;
-  grantTurn: (eventId: string, userId: string) => Promise<void>;
-  releaseTurn: (eventId: string) => Promise<void>;
-
-  sendFeedback: (type: 'bug' | 'feature', text: string) => Promise<void>;
-  resolveFeedback: (feedbackId: string, response?: string) => Promise<void>;
-  publishNews: (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => Promise<void>;
-  deleteNews: (id: string) => Promise<void>;
-  deleteFeedback: (id: string) => Promise<void>;
-  
-  getEpisodeCount: () => Promise<number>;
-  
-  // Notification State (For Gamification)
-  notification: { message: string, type: 'level' | 'mission' | 'shop' } | null;
-  clearNotification: () => void;
-
-  // Economy
-  earnCredits: (amount: number, reason: string) => Promise<void>;
-  spendCredits: (amount: number, itemId: string) => Promise<boolean>;
-  toggleInventoryItem: (itemId: string) => Promise<void>; // ADMIN ONLY TOOL
-
-  // Career Milestone Modal State
-  milestoneEvent: MilestoneEvent | null;
-  closeMilestoneModal: () => void;
-  initialProfileTab: 'profile' | 'career'; // To control Profile tab on navigation
-  setInitialProfileTab: (tab: 'profile' | 'career') => void;
-
-  // Admin Tools
-  resetGamification: () => Promise<void>;
-  resetAutomation: () => Promise<void>;
-  auditQuality: () => Promise<number>;
-  
-  // Trigger Action (for new missions)
-  triggerAction: (action: string) => Promise<void>;
-
-  // Manual Level Up Logic
-  completeLevelUpChallenge: (nextLevel: number, rewardCredits: number) => Promise<void>;
-  
-  // Automation Status
-  automationStatus: { lastRun: number, dailyCount: number, nextRun: number, isGenerating: boolean };
-
-  // Private Chat
-  activePrivateChat: { session: PrivateChatSession, messages: PrivateChatMessage[] } | null;
-  startPrivateChat: (targetUserId: string) => Promise<void>;
-  closePrivateChat: () => Promise<void>;
-  leavePrivateChat: () => Promise<void>;
-  sendPrivateMessage: (text: string, type?: 'text' | 'system') => Promise<void>;
-  setPrivateChatTyping: (isTyping: boolean) => Promise<void>;
-
-  // MAILBOX
-  mailbox: MailboxMessage[];
-  sendSystemMessage: (userId: string, title: string, body: string, type?: 'system' | 'reward' | 'alert' | 'info', actionMovieId?: string) => Promise<void>;
-  markMessageRead: (messageId: string) => Promise<void>;
-  deleteMessage: (messageId: string) => Promise<void>;
-}
-
-const DataContext = createContext<DataContextType | undefined>(undefined);
-
-export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // State Definitions
   const [user, setUser] = useState<User | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [userRatings, setUserRatings] = useState<UserRating[]>([]);
-  const [currentView, setCurrentView] = useState<ViewState>(ViewState.LOGIN);
-  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
-  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(null);
-  const [tmdbToken, setTmdbTokenState] = useState<string>('');
-  
-  const [activeEvent, setActiveEvent] = useState<CineEvent | null>(null);
-  const [eventMessages, setEventMessages] = useState<EventMessage[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [feedbackList, setFeedbackList] = useState<AppFeedback[]>([]);
-  
-  const [notification, setNotification] = useState<{ message: string, type: 'level' | 'mission' | 'shop' } | null>(null);
-  const [milestoneEvent, setMilestoneEvent] = useState<MilestoneEvent | null>(null);
-  const [initialProfileTab, setInitialProfileTab] = useState<'profile' | 'career'>('profile');
-
-  // Automation Status for Admin
-  const [automationStatus, setAutomationStatus] = useState({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false });
-
-  // Top Critic Calculation
-  const [topCriticId, setTopCriticId] = useState<string | null>(null);
-
-  // Private Chat State
-  const [activePrivateChat, setActivePrivateChat] = useState<{ session: PrivateChatSession, messages: PrivateChatMessage[] } | null>(null);
-
-  // Mailbox State
+  const [activeEvent, setActiveEvent] = useState<CineEvent | null>(null);
+  const [eventMessages, setEventMessages] = useState<any[]>([]);
   const [mailbox, setMailbox] = useState<MailboxMessage[]>([]);
-
-  // Refs for Live API Audio (Persisted in Provider)
-  const liveSessionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextStartTimeRef = useRef<number>(0);
-  const currentStreamRef = useRef<MediaStream | null>(null);
   
-  // --- LIVE SESSION STATE ---
+  // UI State
+  const [currentView, setCurrentView] = useState<ViewState>(ViewState.NEWS);
+  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(null);
+  const [initialProfileTab, setInitialProfileTab] = useState<'profile' | 'career'>('profile');
+  
+  // Config
+  const [tmdbToken, setTmdbTokenState] = useState('');
+  const [notification, setNotification] = useState<{type: string, message: string} | null>(null);
+  const [milestoneEvent, setMilestoneEvent] = useState<any>(null);
+  const [automationStatus, setAutomationStatus] = useState({ dailyCount: 0, isGenerating: false, lastRun: 0, nextRun: 0 });
+  
+  // Live & Chat
   const [liveSession, setLiveSession] = useState<LiveSessionState>({
-      isConnected: false,
-      status: 'Desconectado',
-      isUserSpeaking: false,
-      isAiSpeaking: false,
-      toolInUse: null,
-      visualContent: []
+      isConnected: false, status: '', isUserSpeaking: false, isAiSpeaking: false, toolInUse: null, visualContent: []
   });
-  
-  // Timer Ref for usage tracking
-  const usageIntervalRef = useRef<number | null>(null);
-  
-  // Ref to ensure automation runs only once per load
-  const automationCheckedRef = useRef(false);
+  const [activePrivateChat, setActivePrivateChat] = useState<{session: PrivateChatSession, messages: PrivateChatMessage[]} | null>(null);
+  const [activeTriviaMatch, setActiveTriviaMatch] = useState<TriviaMatch | null>(null);
 
-  // AUTH LISTENER
+  const topCriticId = allUsers.length > 0 ? allUsers[0].id : null;
+
+  // View Navigation
+  const setView = (view: ViewState, id?: string | number) => {
+      setCurrentView(view);
+      if (typeof id === 'string') setSelectedMovieId(id);
+      if (typeof id === 'number') setSelectedPersonId(id);
+      window.scrollTo(0, 0);
+  };
+
+  // --- PERSISTENCE: LOAD CONFIG FROM DB ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Fetch User Data
-        const userRef = doc(db, 'users', firebaseUser.uid);
-        const unsubscribeUser = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const userData = docSnap.data() as User;
-                setUser(userData);
-                // REDIRECT FIX: If user is loaded and view is still LOGIN, switch to NEWS
-                setCurrentView(prev => prev === ViewState.LOGIN ? ViewState.NEWS : prev);
-            }
-        });
-        return () => unsubscribeUser();
-      } else {
-        setUser(null);
-        setCurrentView(ViewState.LOGIN);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // MAILBOX LISTENER
-  useEffect(() => {
-      if (!user) {
-          setMailbox([]);
-          return;
-      }
-      const q = query(collection(db, `users/${user.id}/mailbox`), orderBy('timestamp', 'desc'));
-      const unsub = onSnapshot(q, (snap) => {
-          setMailbox(snap.docs.map(d => ({ ...d.data(), id: d.id } as MailboxMessage)));
-      });
-      return () => unsub();
-  }, [user?.id]);
-
-  // --- PRIVATE CHAT LISTENER ---
-  useEffect(() => {
-      if (!user) {
-          setActivePrivateChat(null);
-          return;
-      }
-
-      // Query for active chats where current user is Creator OR Target
-      const q = query(
-          collection(db, 'private_chats'),
-          where('isActive', '==', true)
-      );
-
-      const unsubChat = onSnapshot(q, (snap) => {
-          // Find if there is a relevant chat for ME
-          const relevantChat = snap.docs.find(d => {
-              const data = d.data();
-              return data.creatorId === user.id || data.targetId === user.id;
-          });
-
-          if (relevantChat) {
-              const sessionData = { ...relevantChat.data(), id: relevantChat.id } as PrivateChatSession;
-              
-              // Only trigger if we aren't already in it or it changed
-              setActivePrivateChat(prev => {
-                  if (prev && prev.session.id === sessionData.id) {
-                      // Update session data (e.g. typing status changed)
-                      return { ...prev, session: sessionData };
-                  }
-                  return { session: sessionData, messages: [] };
-              });
-          } else {
-              setActivePrivateChat(null);
-          }
-      });
-
-      return () => unsubChat();
-  }, [user?.id]); // Re-run if user changes
-
-  // SEPARATE EFFECT FOR MESSAGES TO AVOID FLICKER ON TYPING UPDATES
-  useEffect(() => {
-      if (activePrivateChat?.session.id) {
-          const chatId = activePrivateChat.session.id;
-          const qMsg = query(collection(db, `private_chats/${chatId}/messages`), orderBy('timestamp', 'asc'));
-          const unsubMsg = onSnapshot(qMsg, (msgSnap) => {
-              const msgs = msgSnap.docs.map(d => ({ ...d.data(), id: d.id } as PrivateChatMessage));
-              setActivePrivateChat(prev => {
-                  if (!prev || prev.session.id !== chatId) return prev;
-                  return { ...prev, messages: msgs };
-              });
-          });
-          return () => unsubMsg();
-      }
-  }, [activePrivateChat?.session.id]);
-
-  // AUTOMATIC NEWS GENERATION TRIGGER
-  useEffect(() => {
-      const checkAndGenerateAutoNews = async () => {
-          if (!tmdbToken) return; // Need token for images
-          
-          const configRef = doc(db, 'config', 'news_automation');
-          
+      const fetchConfig = async () => {
           try {
-              const snap = await getDoc(configRef);
-              const now = Date.now();
-              const todayStr = new Date().toLocaleDateString('es-ES');
-              
-              let data: any;
-
-              // Ensure document exists
-              if (!snap.exists()) {
-                  data = { lastRun: 0, dailyCount: 0, currentDate: todayStr, isGenerating: false, bannedTitles: [] };
-                  await setDoc(configRef, data);
-              } else {
-                  data = snap.data();
-                  // Reset if new day
-                  if (data.currentDate !== todayStr) {
-                      await updateDoc(configRef, { dailyCount: 0, currentDate: todayStr, isGenerating: false });
-                      data.dailyCount = 0; // Local logic update
-                  }
+              const docRef = doc(db, 'config', 'general');
+              const docSnap = await getDoc(docRef);
+              if (docSnap.exists()) {
+                  setTmdbTokenState(docSnap.data().tmdbToken || '');
               }
-
-              // Update local state for admin UI
-              setAutomationStatus({ 
-                  lastRun: data.lastRun, 
-                  dailyCount: data.dailyCount,
-                  nextRun: data.lastRun + NEWS_INTERVAL_MS,
-                  isGenerating: data.isGenerating
-              });
-
-              // CRITICAL LOCK CHECK:
-              // If lock is ON but old (>10 mins), break it.
-              const isStuck = data.isGenerating && (now - data.lastRun > 10 * 60 * 1000);
-
-              // 2. Conditions check
-              if (data.isGenerating && !isStuck) return;
-              if (data.dailyCount >= MAX_DAILY_NEWS) return;
-              if (now - data.lastRun < NEWS_INTERVAL_MS && !isStuck) return;
-
-              // 3. START GENERATION
-              await updateDoc(configRef, { isGenerating: true });
-              setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
-              
-              try {
-                  // Generate Logic - MERGE Existing + Banned
-                  const existingTitles = news.map(n => n.title);
-                  const bannedTitles = data.bannedTitles || [];
-                  const fullExclusionList = [...existingTitles, ...bannedTitles];
-
-                  const generatedItems = await generateCinemaNews(fullExclusionList);
-                  
-                  if (generatedItems.length > 0) {
-                      const item = generatedItems[0]; // Take only the first one
-                      let finalImage = '';
-                      
-                      // IMPROVED IMAGE SEARCH LOGIC
-                      if (item.searchQuery && tmdbToken) {
-                          try {
-                              const movieResults = await searchMoviesTMDB(item.searchQuery, tmdbToken);
-                              // 1. Prioritize movies with BACKDROP (Landscape)
-                              const bestMovie = movieResults.find(m => m.backdrop_path) || movieResults.find(m => m.poster_path);
-                              
-                              if (bestMovie) {
-                                  finalImage = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
-                              } else {
-                                  // 2. Fallback to Person
-                                  const personResults = await searchPersonTMDB(item.searchQuery, tmdbToken);
-                                  const bestPerson = personResults.find(p => p.profile_path);
-                                  if (bestPerson) {
-                                      finalImage = getImageUrl(bestPerson.profile_path, 'original');
-                                  }
-                              }
-                          } catch (e) { console.error("Auto-news image fetch error", e); }
-                      }
-                      
-                      // Fallback to AI only if TMDB completely failed
-                      if (!finalImage) {
-                          finalImage = `https://image.pollinations.ai/prompt/${encodeURIComponent(item.visualPrompt)}?nologo=true&width=800&height=400&model=flux`;
-                      }
-
-                      await addDoc(collection(db, 'news'), {
-                          title: item.title,
-                          content: item.content,
-                          type: 'general',
-                          imageUrl: finalImage,
-                          timestamp: Date.now()
-                      });
-
-                      // 4. Update Config on Success
-                      await updateDoc(configRef, {
-                          lastRun: Date.now(),
-                          dailyCount: increment(1),
-                          isGenerating: false
-                      });
-                  } else {
-                      // If generation failed (empty array returned due to duplicates/errors)
-                      // LOGIC CHANGE: Wait full interval. Prevents rapid retry loop.
-                      console.log("AutoNews: No new unique items found. Waiting full cycle.");
-                      await updateDoc(configRef, { 
-                          isGenerating: false,
-                          lastRun: Date.now() 
-                      });
-                  }
-              } catch (innerError) {
-                  console.error("News Generation Logic Error:", innerError);
-                  // Ensure we unlock on logic error
-                  await updateDoc(configRef, { isGenerating: false });
-              }
-
           } catch (e) {
-              console.error("Auto News Top Level Error:", e);
-              try { 
-                  const d = await getDoc(configRef);
-                  if (d.exists()) {
-                      await updateDoc(configRef, { isGenerating: false }); 
-                  }
-              } catch(err){}
+              console.error("Error loading config:", e);
           }
       };
+      fetchConfig();
+  }, []);
 
-      if (user && tmdbToken && !automationCheckedRef.current) {
-          checkAndGenerateAutoNews();
-          automationCheckedRef.current = true;
-      }
-  }, [user, tmdbToken, news]); 
+  // Firebase Listeners
+  useEffect(() => {
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          if (firebaseUser) {
+              const userRef = doc(db, 'users', firebaseUser.uid);
+              const userSnap = await getDoc(userRef);
+              if (userSnap.exists()) {
+                  setUser({ id: userSnap.id, ...userSnap.data() } as User);
+              }
+          } else {
+              setUser(null);
+          }
+      });
+      return () => unsubscribe();
+  }, []);
 
-  // DATA SUBSCRIPTIONS
+  useEffect(() => {
+      if (!user?.id) return;
+      return onSnapshot(doc(db, 'users', user.id), (doc) => {
+          if (doc.exists()) setUser({ id: doc.id, ...doc.data() } as User);
+      });
+  }, [user?.id]);
+
+  // CORE DATA LISTENERS
   useEffect(() => {
       const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
-          setAllUsers(snap.docs.map(d => d.data() as User));
+          setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
       });
       const unsubMovies = onSnapshot(collection(db, 'movies'), (snap) => {
-          setMovies(snap.docs.map(d => d.data() as Movie));
+          setMovies(snap.docs.map(d => ({ id: d.id, ...d.data() } as Movie)));
       });
       const unsubRatings = onSnapshot(collection(db, 'ratings'), (snap) => {
           setUserRatings(snap.docs.map(d => d.data() as UserRating));
       });
       const unsubNews = onSnapshot(query(collection(db, 'news'), orderBy('timestamp', 'desc')), (snap) => {
-          setNews(snap.docs.map(d => ({ ...d.data(), id: d.id } as NewsItem)));
+          setNews(snap.docs.map(d => ({ id: d.id, ...d.data() } as NewsItem)));
       });
       const unsubFeedback = onSnapshot(collection(db, 'feedback'), (snap) => {
-          setFeedbackList(snap.docs.map(d => ({ ...d.data(), id: d.id } as AppFeedback)));
+          setFeedbackList(snap.docs.map(d => ({ id: d.id, ...d.data() } as AppFeedback)));
       });
       
-      const qEvent = query(collection(db, 'events'), where('phase', '!=', 'closed'));
-      const unsubEvent = onSnapshot(qEvent, (snap) => {
+      return () => { unsubUsers(); unsubMovies(); unsubRatings(); unsubNews(); unsubFeedback(); };
+  }, []);
+
+  useEffect(() => {
+      const unsub = onSnapshot(query(collection(db, 'events'), orderBy('startDate', 'desc'), limit(1)), (snap) => {
           if (!snap.empty) {
-              const event = snap.docs[0].data() as CineEvent;
-              setActiveEvent(event);
+              const eventData = { id: snap.docs[0].id, ...snap.docs[0].data() } as CineEvent;
+              if (eventData.phase !== 'closed') {
+                  setActiveEvent(eventData);
+              } else {
+                  setActiveEvent(null);
+              }
           } else {
               setActiveEvent(null);
           }
       });
-      
-      const unsubConfig = onSnapshot(doc(db, 'config', 'tmdb'), (docSnap) => {
-         if (docSnap.exists()) {
-             setTmdbTokenState(docSnap.data().token);
-         }
-      });
-      
-      const unsubAuto = onSnapshot(doc(db, 'config', 'news_automation'), (docSnap) => {
-          if (docSnap.exists()) {
-              const d = docSnap.data();
-              const todayStr = new Date().toLocaleDateString('es-ES');
-              const isToday = d.currentDate === todayStr;
-              
-              setAutomationStatus({
-                  lastRun: d.lastRun,
-                  dailyCount: isToday ? d.dailyCount : 0,
-                  nextRun: d.lastRun + NEWS_INTERVAL_MS,
-                  isGenerating: d.isGenerating
-              });
-          }
-      });
-
-      return () => {
-          unsubUsers(); unsubMovies(); unsubRatings(); unsubNews(); unsubFeedback(); unsubEvent(); unsubConfig(); unsubAuto();
-      };
+      return () => unsub();
   }, []);
 
-  // PRESENCE SYSTEM
   useEffect(() => {
-      if (user && user.id) {
-          updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
-          const interval = setInterval(() => {
-              if (auth.currentUser) {
-                  updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
-              }
-          }, 60000);
-          return () => clearInterval(interval);
-      }
-  }, [user?.id]);
-
-  useEffect(() => {
-      if (activeEvent) {
-          const qMessages = query(collection(db, `events/${activeEvent.id}/messages`), orderBy('timestamp', 'asc'));
-          const unsub = onSnapshot(qMessages, (snap) => {
-              setEventMessages(snap.docs.map(d => d.data() as EventMessage));
-          });
-          return () => unsub();
-      } else {
+      if (!activeEvent) {
           setEventMessages([]);
+          return;
       }
+      const q = query(collection(db, `events/${activeEvent.id}/messages`), orderBy('timestamp', 'asc'));
+      return onSnapshot(q, (snap) => {
+          setEventMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
   }, [activeEvent?.id]);
 
   useEffect(() => {
-      if (user && user.status === 'active' && !user.hasSeenWelcome) {
-          const rank1Title = RANKS.find(r => r.minLevel === 1)?.title || 'Espectador Novato';
-          setMilestoneEvent({
-              type: 'welcome',
-              rankTitle: rank1Title,
-              level: 1
-          });
-      }
-  }, [user?.status, user?.hasSeenWelcome]);
-
-
-  const closeMilestoneModal = async () => {
       if (!user) return;
-      setMilestoneEvent(null);
-      if (!user.hasSeenWelcome) {
-          await updateDoc(doc(db, 'users', user.id), { hasSeenWelcome: true });
-      }
-  };
-
-  const sendSystemMessage = async (userId: string, title: string, body: string, type: 'system' | 'reward' | 'alert' | 'info' = 'system', actionMovieId?: string) => {
-      const msg: MailboxMessage = {
-          id: `msg_${Date.now()}_${Math.random()}`,
-          title,
-          body,
-          timestamp: Date.now(),
-          read: false,
-          type,
-          actionMovieId
-      };
-      try {
-          await addDoc(collection(db, `users/${userId}/mailbox`), msg);
-      } catch (e) { console.error("Error sending system msg", e); }
-  };
-
-  const markMessageRead = async (messageId: string) => {
-      if (!user) return;
-      try {
-          await updateDoc(doc(db, `users/${user.id}/mailbox`, messageId), { read: true });
-      } catch (e) { console.error("Error marking read", e); }
-  };
-
-  const deleteMessage = async (messageId: string) => {
-      if (!user) return;
-      try {
-          await deleteDoc(doc(db, `users/${user.id}/mailbox`, messageId));
-      } catch (e) { console.error("Error deleting msg", e); }
-  };
-
-  const earnCredits = async (amount: number, reason: string) => {
-      if (!user) return;
-      try {
-          const newCredits = (user.credits || 0) + amount;
-          await updateDoc(doc(db, 'users', user.id), { credits: newCredits });
-          setNotification({ message: `+${amount} Créditos: ${reason}`, type: 'shop' });
-          // Also send to mailbox for record
-          sendSystemMessage(user.id, "Créditos Recibidos", `Has recibido ${amount} créditos. Motivo: ${reason}`, 'reward');
-      } catch (e) { console.error("Error earning credits", e); }
-  };
-
-  const spendCredits = async (amount: number, itemId: string): Promise<boolean> => {
-      if (!user) return false;
-      const canAfford = (user.credits || 0) >= amount;
-      
-      if (!canAfford) {
-          return false;
-      }
-      try {
-          const newCredits = (user.credits || 0) - amount; 
-          await updateDoc(doc(db, 'users', user.id), {
-              credits: newCredits,
-              inventory: arrayUnion(itemId)
-          });
-          setNotification({ 
-              message: user.isAdmin ? `¡Artículo comprado (Admin)!` : `¡Artículo comprado!`, 
-              type: 'shop' 
-          });
-          sendSystemMessage(user.id, "Compra Realizada", `Has gastado ${amount} créditos en la tienda.`, 'info');
-          return true;
-      } catch (e) { console.error("Error spending credits", e); return false; }
-  };
-
-  const toggleInventoryItem = async (itemId: string) => {
-      if (!user) return;
-      try {
-          if (user.inventory?.includes(itemId)) {
-              await updateDoc(doc(db, 'users', user.id), {
-                  inventory: arrayRemove(itemId)
-              });
-          } else {
-              await updateDoc(doc(db, 'users', user.id), {
-                  inventory: arrayUnion(itemId)
-              });
-          }
-      } catch(e) {
-          console.error("Error toggling admin inventory", e);
-      }
-  };
-
-  const checkAchievements = async (currentUser: User) => {
-      if (!currentUser) return;
-      
-      const adminResetDate = currentUser.lastGamificationReset || 0;
-      const levelStartTime = currentUser.lastLevelUpTimestamp || 0;
-      const filterTimestamp = Math.max(adminResetDate, levelStartTime);
-
-      const myRatingsRelative = userRatings.filter(r => r.userId === currentUser.id && r.timestamp > filterTimestamp);
-      
-      const stats = {
-          ratingsCount: myRatingsRelative.length,
-          reviewsCount: myRatingsRelative.filter(r => r.comment && r.comment.length > 5).length,
-          likesReceived: myRatingsRelative.reduce((acc, r) => acc + (r.likes?.length || 0), 0),
-          horrorCount: myRatingsRelative.filter(r => {
-              const m = movies.find(mov => mov.id === r.movieId);
-              return m && m.genre.some(g => g.toLowerCase().includes('terror') || g.toLowerCase().includes('horror'));
-          }).length,
-          actionCount: myRatingsRelative.filter(r => {
-              const m = movies.find(mov => mov.id === r.movieId);
-              return m && m.genre.some(g => { const gl = g.toLowerCase(); return gl.includes('acción') || gl.includes('action') || gl.includes('aventura'); });
-          }).length,
-          comedyCount: myRatingsRelative.filter(r => {
-              const m = movies.find(mov => mov.id === r.movieId);
-              return m && m.genre.some(g => g.toLowerCase().includes('comedia') || g.toLowerCase().includes('comedy'));
-          }).length,
-          dramaCount: myRatingsRelative.filter(r => {
-              const m = movies.find(mov => mov.id === r.movieId);
-              return m && m.genre.some(g => g.toLowerCase().includes('drama'));
-          }).length,
-          scifiCount: myRatingsRelative.filter(r => {
-              const m = movies.find(mov => mov.id === r.movieId);
-              return m && m.genre.some(g => g.toLowerCase().includes('ciencia ficción') || g.toLowerCase().includes('sci-fi'));
-          }).length
-      };
-
-      let newXp = 0; 
-      let newCompletedMissions = [...(currentUser.completedMissions || [])]; 
-      let missionsCompletedNow: Mission[] = [];
-
-      MISSIONS.forEach(mission => {
-          if (newCompletedMissions.includes(mission.id)) {
-               newXp += mission.xpReward;
-          } else {
-              const rank = RANKS.find(r => r.id === mission.rankId);
-              const currentLevel = currentUser.level || 1;
-
-              if (rank && (currentLevel >= rank.minLevel)) {
-                  if (mission.condition(currentUser, stats)) {
-                      newXp += mission.xpReward;
-                      newCompletedMissions.push(mission.id);
-                      missionsCompletedNow.push(mission);
-                  }
-              }
-          }
+      const q = query(collection(db, `users/${user.id}/mailbox`), orderBy('timestamp', 'desc'));
+      return onSnapshot(q, (snap) => {
+          setMailbox(snap.docs.map(d => ({ id: d.id, ...d.data() } as MailboxMessage)));
       });
-      
-      if (newXp !== currentUser.xp || newCompletedMissions.length !== (currentUser.completedMissions || []).length) {
-          try {
-              await updateDoc(doc(db, 'users', currentUser.id), {
-                  xp: newXp,
-                  completedMissions: newCompletedMissions
-              });
-              
-              if (missionsCompletedNow.length > 0) {
-                  setNotification({ message: `¡Misión Completada: ${missionsCompletedNow[0].title}! (+${missionsCompletedNow[0].xpReward} XP)`, type: 'mission' });
-                  // Send Mailbox notification for mission complete
-                  sendSystemMessage(currentUser.id, "Misión Completada", `Has completado: "${missionsCompletedNow[0].title}". Recompensa: +${missionsCompletedNow[0].xpReward} XP.`, 'reward');
-              }
-          } catch(e) { console.error("Gamification update error", e); }
-      }
-  };
+  }, [user?.id]);
 
-  useEffect(() => {
-      if (!user) return;
-      const currentLevel = user.level || 1;
-      const nextLevelThreshold = XP_TABLE[currentLevel - 1]; 
-      
-      if (user.xp >= nextLevelThreshold && !milestoneEvent) {
-           const nextRank = RANKS.find(r => r.minLevel === currentLevel + 1);
-           const t = setTimeout(() => {
-               setMilestoneEvent({
-                   type: 'challenge_ready',
-                   rankTitle: nextRank ? nextRank.title : `Nivel ${currentLevel + 1}`,
-                   level: currentLevel + 1
-               });
-           }, 2000);
-           return () => clearTimeout(t);
-      }
-  }, [user?.xp, user?.level]);
-
-
-  const completeLevelUpChallenge = async (nextLevel: number, rewardCredits: number) => {
-      if (!user) return;
-      const oldLevel = user.level || 1;
-      
-      if (nextLevel > oldLevel) {
-          try {
-              const batch = writeBatch(db);
-              const userRef = doc(db, 'users', user.id);
-              
-              batch.update(userRef, {
-                  level: nextLevel,
-                  lastLevelUpTimestamp: Date.now(),
-                  gamificationStats: {}, 
-                  credits: (user.credits || 0) + rewardCredits
-              });
-              
-              await batch.commit();
-              
-              setNotification({ message: `+${rewardCredits} Créditos: Reto de Ascenso Completado`, type: 'shop' });
-              
-              const newRank = RANKS.find(r => r.minLevel === nextLevel) || RANKS.slice().reverse().find(r => nextLevel >= r.minLevel);
-              setMilestoneEvent({
-                  type: 'levelup',
-                  rankTitle: newRank ? newRank.title : `Nivel ${nextLevel}`,
-                  level: nextLevel
-              });
-              
-              sendSystemMessage(user.id, "¡Ascenso de Nivel!", `Felicidades por alcanzar el Nivel ${nextLevel}. Has recibido ${rewardCredits} créditos.`, 'reward');
-              
-          } catch(e) { console.error("Error completing level up", e); }
-      }
-  };
-
-
-  const triggerAction = async (action: string) => {
-      if (!user) return;
-      
-      const currentStats = user.gamificationStats || {};
-      
-      if (typeof currentStats[action] === 'boolean' && currentStats[action]) return;
-
+  // Auth Methods
+  const login = async (email: string, pass: string) => {
       try {
-        await updateDoc(doc(db, 'users', user.id), {
-            [`gamificationStats.${action}`]: true
-        });
-        const updatedUser = { 
-            ...user, 
-            gamificationStats: { ...currentStats, [action]: true } 
-        };
-        setUser(updatedUser);
-        checkAchievements(updatedUser);
-      } catch (e) { console.error("Error triggering action", e); }
+          await signInWithEmailAndPassword(auth, email, pass);
+          return { success: true, message: 'Bienvenido' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
+      }
   };
+
+  const register = async (email: string, name: string, pass: string) => {
+      try {
+          const res = await createUserWithEmailAndPassword(auth, email, pass);
+          const newUser: User = {
+              id: res.user.uid,
+              email,
+              name,
+              avatarUrl: STARTER_AVATARS[Math.floor(Math.random() * STARTER_AVATARS.length)].url,
+              watchedMovies: [],
+              watchlist: [],
+              status: 'pending',
+              isAdmin: false,
+              xp: 0,
+              level: 1,
+              credits: 0,
+              completedMissions: [],
+              gamificationStats: {}
+          };
+          await setDoc(doc(db, 'users', res.user.uid), newUser as any);
+          return { success: true, message: 'Cuenta creada. Espera aprobación.' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
+      }
+  };
+
+  const logout = () => signOut(auth);
+  const resetPassword = async (email: string) => {
+      try {
+          await sendPasswordResetEmail(auth, email);
+          return { success: true, message: 'Correo enviado.' };
+      } catch (e: any) {
+          return { success: false, message: e.message };
+      }
+  };
+
+  // Data Methods
+  const addMovie = async (movie: Movie) => {
+      if (!movie.id) return;
+      await setDoc(doc(db, 'movies', movie.id), movie);
+  };
+
+  const checkMissions = (userId: string) => { /* Placeholder */ };
+
+  const rateMovie = async (movieId: string, detailed: any, comment: string, spoiler?: string) => {
+      if (!user) return;
+      const ratingData: UserRating = {
+          movieId,
+          userId: user.id,
+          detailed,
+          rating: detailed.average,
+          comment,
+          spoiler,
+          timestamp: Date.now()
+      };
+      await setDoc(doc(db, 'ratings', `${user.id}_${movieId}`), ratingData);
+      
+      if (!user.watchedMovies.includes(movieId)) {
+          await updateDoc(doc(db, 'users', user.id), {
+              watchedMovies: arrayUnion(movieId),
+              watchlist: arrayRemove(movieId)
+          });
+      }
+      checkMissions(user.id);
+  };
+
+  const unwatchMovie = async (movieId: string) => {
+      if (!user) return;
+      await deleteDoc(doc(db, 'ratings', `${user.id}_${movieId}`));
+      await updateDoc(doc(db, 'users', user.id), {
+          watchedMovies: arrayRemove(movieId)
+      });
+  };
+
+  const toggleWatchlist = async (movieId: string) => {
+      if (!user) return;
+      if (user.watchlist.includes(movieId)) {
+          await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movieId) });
+      } else {
+          await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) });
+      }
+  };
+
+  const toggleReviewVote = (targetUserId: string, movieId: string, voteType: 'like'|'dislike') => {
+      // Placeholder logic for likes
+      const ratingId = `${targetUserId}_${movieId}`;
+      const rating = userRatings.find(r => r.movieId === movieId && r.userId === targetUserId);
+      if (!rating || !user) return;
+
+      const userLikes = rating.likes || [];
+      const userDislikes = rating.dislikes || [];
+      
+      let updates = {};
+
+      if (voteType === 'like') {
+          if (userLikes.includes(user.id)) {
+              updates = { likes: arrayRemove(user.id) };
+          } else {
+              updates = { likes: arrayUnion(user.id), dislikes: arrayRemove(user.id) };
+          }
+      } else {
+          if (userDislikes.includes(user.id)) {
+              updates = { dislikes: arrayRemove(user.id) };
+          } else {
+              updates = { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) };
+          }
+      }
+      updateDoc(doc(db, 'ratings', ratingId), updates);
+  };
+
+  // Admin Methods
+  const approveUser = (uid: string) => updateDoc(doc(db, 'users', uid), { status: 'active' });
+  const rejectUser = (uid: string, banTime?: number) => {
+      const update: any = { status: 'rejected' };
+      if (banTime) update.banExpiresAt = Date.now() + banTime;
+      return updateDoc(doc(db, 'users', uid), update);
+  };
+  const deleteUserAccount = (uid: string) => deleteDoc(doc(db, 'users', uid));
+  const toggleUserAdmin = (uid: string) => {
+      const u = allUsers.find(u => u.id === uid);
+      if (u) updateDoc(doc(db, 'users', uid), { isAdmin: !u.isAdmin });
+  };
+  
+  // Persist Token to DB
+  const setTmdbToken = async (token: string) => {
+      setTmdbTokenState(token);
+      await setDoc(doc(db, 'config', 'general'), { tmdbToken: token }, { merge: true });
+  };
+  
+  // Messaging
+  const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
+      await addDoc(collection(db, `users/${userId}/mailbox`), {
+          title, body, type, actionMovieId, actionEventId, timestamp: Date.now(), read: false
+      });
+  };
+  const markMessageRead = async (msgId: string) => {
+      if(user) {
+          try {
+              await updateDoc(doc(db, `users/${user.id}/mailbox`, msgId), { read: true });
+          } catch(e) {
+              console.warn("Could not mark message as read (might be deleted):", e);
+          }
+      }
+  }
+  const deleteMessage = async (msgId: string) => {
+      // Use auth.currentUser to ensure we are deleting for the currently signed-in user safely
+      const currentUser = auth.currentUser;
+      if(currentUser) {
+          try {
+              await deleteDoc(doc(db, `users/${currentUser.uid}/mailbox`, msgId));
+          } catch(e) {
+              console.error("Could not delete message:", e);
+              throw e; // Propagate error
+          }
+      }
+  }
+
+  // News & Feedback
+  const publishNews = (title: string, content: string, type: string, imageUrl?: string) => {
+      addDoc(collection(db, 'news'), { title, content, type, imageUrl, timestamp: Date.now() });
+  };
+  const deleteNews = (id: string) => deleteDoc(doc(db, 'news', id));
+  const sendFeedback = (type: string, text: string) => {
+      if(user) addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() });
+  };
+  const resolveFeedback = (id: string) => updateDoc(doc(db, 'feedback', id), { status: 'solved' });
+  const deleteFeedback = (id: string) => deleteDoc(doc(db, 'feedback', id));
 
   const resetGamification = async () => {
-      const usersSnap = await getDocs(collection(db, 'users'));
-      if (usersSnap.empty) { alert("No hay usuarios."); return; }
-      const allFreshUsers = usersSnap.docs.map(d => d.data() as User);
-      const chunkSize = 400; const chunks = [];
-      for (let i = 0; i < allFreshUsers.length; i += chunkSize) chunks.push(allFreshUsers.slice(i, i + chunkSize));
-      const resetTimestamp = Date.now();
-
-      try {
-          for (const chunk of chunks) {
-              const batch = writeBatch(db);
-              chunk.forEach(u => {
-                  const ref = doc(db, 'users', u.id);
-                  batch.update(ref, {
-                      xp: 0, level: 1, completedMissions: [], credits: 0, inventory: [],
-                      hasSeenWelcome: false, 
-                      gamificationStats: deleteField(),
-                      lastGamificationReset: resetTimestamp,
-                      lastLevelUpTimestamp: resetTimestamp
-                  });
-              });
-              await batch.commit();
-          }
-          alert("¡RESET COMPLETADO!");
-          setTimeout(() => window.location.reload(), 1000);
-      } catch (e) { alert("Error: " + String(e)); }
+      allUsers.forEach(u => updateDoc(doc(db, 'users', u.id), { xp: 0, level: 1, credits: 0, completedMissions: [] }));
   };
+  const resetAutomation = () => setAutomationStatus({ ...automationStatus, isGenerating: false });
+  const auditQuality = async () => 0;
 
-  const resetAutomation = async () => {
-      await setDoc(doc(db, 'config', 'news_automation'), {
-          lastRun: 0, 
-          dailyCount: 0,
-          currentDate: new Date().toLocaleDateString('es-ES'),
-          isGenerating: false,
-          bannedTitles: []
+  // Events
+  const createEvent = async (data: any) => {
+      await addDoc(collection(db, 'events'), { ...data, phase: 'voting', startDate: Date.now(), votingDeadline: Date.now() + 86400000 * 3, viewingDeadline: Date.now() + 86400000 * 7 });
+  }
+  const closeEvent = (id: string) => updateDoc(doc(db, 'events', id), { phase: 'closed' });
+
+  const voteForCandidate = async (eventId: string, tmdbId: number) => {
+      if (!user || !activeEvent) return;
+      const newCandidates = activeEvent.candidates.map(c => {
+          const votes = c.votes.filter(uid => uid !== user.id);
+          if (c.tmdbId === tmdbId) votes.push(user.id);
+          return { ...c, votes };
       });
-      setAutomationStatus({ lastRun: 0, dailyCount: 0, nextRun: 0, isGenerating: false }); 
+      await updateDoc(doc(db, 'events', eventId), { candidates: newCandidates });
+      
+      const userRef = doc(db, 'users', user.id);
+      await updateDoc(userRef, { 
+          'gamificationStats.vote_event': true, 
+          'gamificationStats.cineforum_participation': true,
+          'gamificationStats.cineforumVoteCount': increment(1)
+      });
+      checkMissions(user.id);
   };
 
-  // --- QUALITY AUDIT ---
-  const auditQuality = async (): Promise<number> => {
-      let flaggedCount = 0;
-      const batch = writeBatch(db);
-      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000; // Just as a safe buffer if we were doing time checks
+  const transitionEventPhase = async (eventId: string, phase: EventPhase, winnerTmdbId?: number) => {
+      const update: any = { phase };
+      if (winnerTmdbId) update.winnerTmdbId = winnerTmdbId;
+      await updateDoc(doc(db, 'events', eventId), update);
+  };
 
-      for (const r of userRatings) {
-          // Check if review has text content
-          if (r.comment && r.comment.length > 0) {
-              const wordCount = r.comment.trim().split(/\s+/).filter(w => w.length > 0).length;
-              const hasParagraphs = r.comment.includes('\n');
-              const isShort = wordCount < 50 || !hasParagraphs;
+  const toggleEventCommitment = async (eventId: string, type: 'view' | 'debate', specificTmdbId?: number, preference?: { solo: boolean, group: boolean }) => {
+      if (!user || !activeEvent) return;
+      
+      const field = type === 'view' ? 'committedViewers' : 'committedDebaters';
+      const list = (activeEvent as any)?.[field] || [];
+      const hasCommitted = list.includes(user.id);
+      
+      const currentPrefs = activeEvent.viewingPreferences || {};
+      let newPrefs = { ...currentPrefs };
 
-              // If it fails standards AND hasn't been warned yet
-              if (isShort && !r.warningSentAt) {
-                  // 1. Mark rating as warned
-                  const ratingRef = doc(db, 'ratings', `${r.userId}_${r.movieId}`);
-                  batch.update(ratingRef, { warningSentAt: Date.now() });
-
-                  // 2. Send System Message
-                  const msgRef = doc(collection(db, `users/${r.userId}/mailbox`));
-                  const movieTitle = movies.find(m => m.id === r.movieId)?.title || 'la película';
-                  
-                  batch.set(msgRef, {
-                      id: msgRef.id,
-                      title: "⚠️ Aviso de Calidad: Reseña Corta",
-                      body: `Tu reseña de "${movieTitle}" no cumple con los estándares de calidad del club (mínimo 50 palabras y 2 párrafos). Por favor, edítala o será eliminada en un plazo de 7 días.`,
-                      timestamp: Date.now(),
-                      read: false,
-                      type: 'alert',
-                      actionMovieId: r.movieId
+      if (type === 'view') {
+          if (preference) {
+              newPrefs[user.id] = preference;
+              if (!hasCommitted) {
+                  await updateDoc(doc(db, 'events', eventId), {
+                      [field]: arrayUnion(user.id),
+                      viewingPreferences: newPrefs
                   });
+              } else {
+                  await updateDoc(doc(db, 'events', eventId), {
+                      viewingPreferences: newPrefs
+                  });
+              }
 
-                  flaggedCount++;
+              if (preference.group) {
+                  const interestedUsers = Object.entries(newPrefs)
+                      .filter(([uid, pref]) => uid !== user.id && (pref as any).group)
+                      .map(([uid]) => uid);
+                  
+                  if (interestedUsers.length > 0) {
+                      const allGroupies = [...interestedUsers, user.id];
+                      allGroupies.forEach(uid => {
+                          sendSystemMessage(uid, "¡Hay Quórum!", "¡Tienes compañeros para ver la peli! Entra al evento para coordinar lugar y hora.", "info", undefined, eventId);
+                      });
+                  }
+              }
+          } else {
+              await updateDoc(doc(db, 'events', eventId), {
+                  [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id)
+              });
+          }
+      } else {
+          await updateDoc(doc(db, 'events', eventId), {
+              [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id)
+          });
+      }
+
+      if (!hasCommitted) {
+          const userRef = doc(db, 'users', user.id);
+          await updateDoc(userRef, { 'gamificationStats.cineforum_participation': true });
+          checkMissions(user.id);
+      }
+
+      const targetTmdbId = specificTmdbId || activeEvent.winnerTmdbId;
+      if (type === 'view' && targetTmdbId) {
+          const tmdbId = targetTmdbId;
+          let movie = movies.find(m => m.tmdbId === tmdbId);
+          let movieId = movie?.id || `tmdb-${tmdbId}`;
+
+          if (!hasCommitted && !movie) {
+              try {
+                  const details = await getMovieDetailsTMDB(tmdbId, tmdbToken);
+                  let newMovie: Movie;
+                  if (details) {
+                      newMovie = {
+                          id: movieId,
+                          tmdbId: details.id,
+                          title: details.title,
+                          year: parseInt(details.release_date?.split('-')[0]) || new Date().getFullYear(),
+                          director: details.credits?.crew?.find(c => c.job === 'Director')?.name || 'Unknown',
+                          genre: details.genres?.map(g => g.name) || [],
+                          posterUrl: getImageUrl(details.poster_path),
+                          backdropUrl: getImageUrl(details.backdrop_path, 'original'),
+                          description: details.overview,
+                          cast: details.credits?.cast?.slice(0, 5).map(c => c.name) || [],
+                          rating: 0,
+                          totalVotes: 0
+                      };
+                  } else {
+                      const candidate = activeEvent.candidates.find(c => c.tmdbId === tmdbId);
+                      if (!candidate) throw new Error("Candidate data missing"); 
+                      newMovie = {
+                          id: movieId,
+                          tmdbId: candidate.tmdbId,
+                          title: candidate.title,
+                          year: candidate.year,
+                          director: 'Ver detalles',
+                          genre: [],
+                          posterUrl: candidate.posterUrl,
+                          backdropUrl: activeEvent.backdropUrl || candidate.posterUrl,
+                          description: candidate.description,
+                          cast: [],
+                          rating: 0,
+                          totalVotes: 0
+                      };
+                  }
+                  await addMovie(newMovie);
+              } catch (e) {
+                  console.error("Error ensuring movie exists for watchlist:", e);
+                  return;
+              }
+          }
+
+          if (movieId) {
+              const userRef = doc(db, 'users', user.id);
+              if (hasCommitted && !preference) {
+                  await updateDoc(userRef, { watchlist: arrayRemove(movieId) });
+              } else if (!hasCommitted) {
+                  if (!user.watchedMovies.includes(movieId)) {
+                      await updateDoc(userRef, { watchlist: arrayUnion(movieId) });
+                      await updateDoc(userRef, { 'gamificationStats.watchlist': true });
+                  }
               }
           }
       }
-
-      if (flaggedCount > 0) {
-          await batch.commit();
-      }
-      return flaggedCount;
   };
 
-  useEffect(() => {
-      if (user) { checkAchievements(user); }
-  }, [user?.id, user?.lastGamificationReset, user?.lastLevelUpTimestamp, userRatings]); 
-
-  const clearNotification = () => setNotification(null);
-
-  useEffect(() => {
-      if (allUsers.length > 0 && userRatings.length > 0) {
-          const stats = allUsers
-            .filter(u => u.status === 'active' || u.isAdmin)
-            .map(u => {
-                const reviews = userRatings.filter(r => r.userId === u.id);
-                const totalLikes = reviews.reduce((acc, r) => acc + (r.likes?.length || 0), 0);
-                const totalDislikes = reviews.reduce((acc, r) => acc + (r.dislikes?.length || 0), 0);
-                const prestige = totalLikes - totalDislikes;
-                return { id: u.id, prestige, reviewCount: reviews.length };
-            })
-            .sort((a, b) => {
-                if (b.prestige !== a.prestige) return b.prestige - a.prestige;
-                return b.reviewCount - a.reviewCount;
-            });
-          if (stats.length > 0) setTopCriticId(stats[0].id);
-      }
-  }, [allUsers, userRatings]);
-
-  const getRemainingVoiceSeconds = (): number => {
-      if (!user) return 0;
-      const today = new Date().setHours(0,0,0,0);
-      const lastUsageDate = user.voiceUsageDate || 0;
-      const usedToday = lastUsageDate === today ? (user.voiceUsageSeconds || 0) : 0;
-      return Math.max(0, DAILY_VOICE_LIMIT_SECONDS - usedToday);
+  const proposeMeetupLocation = async (eventId: string, location: { name: string, address: string, uri: string }) => {
+      if (!user) return;
+      const meetupLoc = {
+          id: `loc_${Date.now()}`,
+          name: location.name,
+          address: location.address,
+          mapUri: location.uri,
+          proposedBy: user.id,
+          votes: [user.id]
+      };
+      
+      const eventRef = doc(db, 'events', eventId);
+      const eventSnap = await getDoc(eventRef);
+      if (!eventSnap.exists()) return;
+      const currentLocs = eventSnap.data().meetupProposal?.locations || [];
+      
+      await updateDoc(eventRef, {
+          'meetupProposal.locations': [...currentLocs, meetupLoc]
+      });
   };
 
-  const startUsageTracking = () => {
-      if (usageIntervalRef.current) clearInterval(usageIntervalRef.current);
-      usageIntervalRef.current = window.setInterval(async () => {
-          if (!auth.currentUser) return;
-          const today = new Date().setHours(0,0,0,0);
-          const userRef = doc(db, 'users', auth.currentUser.uid);
-          try {
-              const snap = await getDoc(userRef);
-              if (snap.exists()) {
-                  const data = snap.data() as User;
-                  const lastDate = data.voiceUsageDate || 0;
-                  let currentSeconds = data.voiceUsageSeconds || 0;
-                  if (lastDate !== today) currentSeconds = 0; 
-                  const newSeconds = currentSeconds + 1;
-                  if (newSeconds >= DAILY_VOICE_LIMIT_SECONDS) {
-                      stopLiveSession(); 
-                      alert("Límite diario de voz alcanzado.");
-                  }
-                  await updateDoc(userRef, { voiceUsageDate: today, voiceUsageSeconds: newSeconds });
+  const voteMeetupLocation = async (eventId: string, locationId: string) => {
+      if (!user) return;
+      const eventRef = doc(db, 'events', eventId);
+      const eventSnap = await getDoc(eventRef);
+      if (!eventSnap.exists()) return;
+      
+      const currentLocs = eventSnap.data().meetupProposal?.locations || [];
+      const newLocs = currentLocs.map((loc: any) => {
+          if (loc.id === locationId) {
+              const votes = loc.votes || [];
+              if (votes.includes(user.id)) {
+                  return { ...loc, votes: votes.filter((uid: string) => uid !== user.id) };
+              } else {
+                  return { ...loc, votes: [...votes, user.id] };
               }
-          } catch(e) { console.error(e); }
+          }
+          return loc;
+      });
+
+      await updateDoc(eventRef, {
+          'meetupProposal.locations': newLocs
+      });
+  };
+
+  const toggleTimeVote = async (eventId: string, timeKey: string) => {
+      if (!user || !activeEvent) return;
+      const currentVotes = activeEvent.timeVotes?.[timeKey] || [];
+      const hasVoted = currentVotes.includes(user.id);
+      const newVotes = hasVoted ? currentVotes.filter(uid => uid !== user.id) : [...currentVotes, user.id];
+      await updateDoc(doc(db, 'events', eventId), {
+          [`timeVotes.${timeKey}`]: newVotes
+      });
+  };
+
+  const sendEventMessage = async (eventId: string, text: string, role: 'user'|'moderator'|'system' = 'user', audioBase64?: string) => {
+      const msg = {
+          userId: user?.id || 'system',
+          userName: role === 'moderator' ? 'Cine Mensa IA' : user?.name || 'Sistema',
+          userAvatar: role === 'moderator' ? 'https://ui-avatars.com/api/?name=AI&background=d4af37&color=000' : user?.avatarUrl || '',
+          text,
+          role,
+          audioBase64,
+          timestamp: Date.now()
+      };
+      await addDoc(collection(db, `events/${eventId}/messages`), msg);
+      if (role === 'user' && user) {
+          const userRef = doc(db, 'users', user.id);
+          await updateDoc(userRef, { 'gamificationStats.cineforum_participation': true });
+          checkMissions(user.id);
+      }
+  };
+
+  const raiseHand = async (eventId: string) => {
+      if (!user) return;
+      await updateDoc(doc(db, 'events', eventId), {
+          speakerQueue: arrayUnion(user.id)
+      });
+  };
+
+  const grantTurn = async (eventId: string, userId: string) => {
+      await updateDoc(doc(db, 'events', eventId), {
+          currentSpeakerId: userId,
+          speakerQueue: arrayRemove(userId)
+      });
+  };
+
+  const releaseTurn = async (eventId: string) => {
+      await updateDoc(doc(db, 'events', eventId), {
+          currentSpeakerId: null
+      });
+  };
+
+  const getEpisodeCount = async () => {
+      return 5;
+  };
+
+  // Live Session
+  const startLiveSession = async (mode: string) => {
+      if (!process.env.API_KEY) {
+          alert("API Key missing");
+          return;
+      }
+      setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...' }));
+      setTimeout(() => {
+          setLiveSession(prev => ({ ...prev, status: 'En línea' }));
       }, 1000);
   };
 
-  const stopUsageTracking = () => {
-      if (usageIntervalRef.current) { clearInterval(usageIntervalRef.current); usageIntervalRef.current = null; }
-  };
-
-  // --- LIVE SESSION ---
   const stopLiveSession = () => {
-      stopUsageTracking();
-      if (liveSessionRef.current) { try { liveSessionRef.current.close(); } catch(e) {} liveSessionRef.current = null; }
-      if (processorRef.current) { processorRef.current.disconnect(); processorRef.current = null; }
-      if (inputSourceRef.current) { inputSourceRef.current.disconnect(); inputSourceRef.current = null; }
-      if (currentStreamRef.current) { currentStreamRef.current.getTracks().forEach(track => track.stop()); currentStreamRef.current = null; }
-      if (audioContextRef.current) { try { audioContextRef.current.close(); } catch(e) {} audioContextRef.current = null; }
-      audioQueueRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
-      audioQueueRef.current = [];
-      setLiveSession({ isConnected: false, status: 'Desconectado', isUserSpeaking: false, isAiSpeaking: false, toolInUse: null, visualContent: [] });
+      setLiveSession(prev => ({ ...prev, isConnected: false, status: '', visualContent: [] }));
   };
 
-  const startLiveSession = async (mode: 'general' | 'debate', contextData?: any) => {
-      if (!user) return;
-      const isTopCritic = user.id === topCriticId;
-      if (!user.isAdmin && !isTopCritic) {
-          alert("Acceso denegado: Solo el Administrador y el Crítico #1 del ranking pueden usar la voz en vivo.");
-          return;
-      }
-      const remaining = getRemainingVoiceSeconds();
-      if (remaining <= 0 && !user.isAdmin) { alert("Has consumido tus 5 minutos diarios de voz."); return; }
-      
-      try {
-          setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...', visualContent: [] }));
-          let systemInstruction = '';
-          if (mode === 'general') {
-              const watchedTitles = movies.filter(m => user.watchedMovies.includes(m.id)).map(m => m.title).join(", ");
-              systemInstruction = `Expert movie buff. User watched: ${watchedTitles.slice(0, 500)}. Use tools to show images.`;
-          } else if (mode === 'debate') {
-              const { movieTitle, themeTitle } = contextData || { movieTitle: 'Peli', themeTitle: 'General' };
-              systemInstruction = `TV Show Host for "Cine Mensa". Discussing "${movieTitle}" (Theme: ${themeTitle}). Charismatic, Spanish neutral.`;
-          }
-
-          const tools = [{ functionDeclarations: [{ name: "show_movie", description: "Show movie info", parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, year: { type: Type.NUMBER } }, required: ["title"] } }, { name: "show_person", description: "Show person photo", parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING } }, required: ["name"] } }] }];
-
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioContextClass({ sampleRate: 16000 });
-          audioContextRef.current = ctx;
-          nextStartTimeRef.current = ctx.currentTime;
-
-          const client = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-          const sessionPromise = client.live.connect({
-              model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-              config: { responseModalities: [Modality.AUDIO], systemInstruction: systemInstruction, tools: tools, speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } },
-              callbacks: {
-                  onopen: async () => {
-                      setLiveSession(prev => ({ ...prev, status: 'Conectado - Escuchando...' }));
-                      if (!user.isAdmin) startUsageTracking();
-                      try {
-                          const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-                          currentStreamRef.current = stream;
-                          const source = ctx.createMediaStreamSource(stream);
-                          inputSourceRef.current = source;
-                          const processor = ctx.createScriptProcessor(4096, 1, 1);
-                          processorRef.current = processor;
-                          processor.onaudioprocess = (e) => {
-                              const inputData = e.inputBuffer.getChannelData(0);
-                              const rms = Math.sqrt(inputData.reduce((s, v) => s + v * v, 0) / inputData.length);
-                              setLiveSession(prev => ({ ...prev, isUserSpeaking: rms > 0.02 }));
-                              const pcmBlob = createPcmBlob(inputData);
-                              sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-                          };
-                          source.connect(processor); processor.connect(ctx.destination);
-                      } catch (err) { console.error("Mic Error:", err); stopLiveSession(); }
-                  },
-                  onmessage: async (msg: LiveServerMessage) => {
-                      const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-                      if (audioData) {
-                          setLiveSession(prev => ({ ...prev, isAiSpeaking: true }));
-                          try {
-                              const audioBytes = base64ToUint8Array(audioData);
-                              const pcm16 = new Int16Array(audioBytes.buffer);
-                              const float32 = new Float32Array(pcm16.length);
-                              for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 32768.0;
-                              const outputBuffer = ctx.createBuffer(1, float32.length, 24000);
-                              outputBuffer.copyToChannel(float32, 0);
-                              const source = ctx.createBufferSource();
-                              source.buffer = outputBuffer;
-                              source.connect(ctx.destination);
-                              const now = ctx.currentTime;
-                              if (nextStartTimeRef.current < now) nextStartTimeRef.current = now + 0.05;
-                              source.start(nextStartTimeRef.current);
-                              nextStartTimeRef.current += outputBuffer.duration;
-                              source.onended = () => { audioQueueRef.current = audioQueueRef.current.filter(s => s !== source); if (audioQueueRef.current.length === 0) setLiveSession(prev => ({ ...prev, isAiSpeaking: false })); };
-                              audioQueueRef.current.push(source);
-                          } catch (e) { console.error(e); }
-                      }
-                      if (msg.serverContent?.interrupted) {
-                          audioQueueRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
-                          audioQueueRef.current = [];
-                          nextStartTimeRef.current = 0;
-                          setLiveSession(prev => ({ ...prev, isAiSpeaking: false }));
-                      }
-                      if (msg.toolCall) {
-                          const functionResponses = [];
-                          for (const fc of msg.toolCall.functionCalls) {
-                              if (fc.name === 'show_movie') {
-                                  const { title, year } = fc.args as any;
-                                  setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${title}` }));
-                                  const movieDetails = await findMovieByTitleAndYear(title, year, tmdbToken);
-                                  if (movieDetails) {
-                                      const mappedMovie: Movie = { id: `tmdb-${movieDetails.id}`, tmdbId: movieDetails.id, title: movieDetails.title, year: parseInt(movieDetails.release_date?.split('-')[0]) || 0, posterUrl: getImageUrl(movieDetails.poster_path), director: 'Desconocido', genre: [], description: movieDetails.overview, rating: movieDetails.vote_average, totalVotes: 0 };
-                                      setLiveSession(prev => ({ ...prev, toolInUse: null, visualContent: [...prev.visualContent, { type: 'movie', data: mappedMovie }] }));
-                                  } else { setLiveSession(prev => ({ ...prev, toolInUse: null })); }
-                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: 'ok' } });
-                              } else if (fc.name === 'show_person') {
-                                  const { name } = fc.args as any;
-                                  setLiveSession(prev => ({ ...prev, toolInUse: `Buscando: ${name}` }));
-                                  const people = await searchPersonTMDB(name, tmdbToken);
-                                  if (people.length > 0) { setLiveSession(prev => ({ ...prev, toolInUse: null, visualContent: [...prev.visualContent, { type: 'person', data: people[0] }] })); } else { setLiveSession(prev => ({ ...prev, toolInUse: null })); }
-                                  functionResponses.push({ id: fc.id, name: fc.name, response: { result: 'ok' } });
-                              }
-                          }
-                          if (functionResponses.length > 0) { sessionPromise.then(session => { session.sendToolResponse({ functionResponses: functionResponses }); }); }
-                      }
-                  },
-                  onerror: (e) => { console.error("Live Session Error:", e); stopLiveSession(); },
-                  onclose: () => { setLiveSession(prev => ({ ...prev, isConnected: false, status: 'Desconectado' })); }
-              }
-          });
-          liveSessionRef.current = await sessionPromise;
-      } catch (e) { console.error("Connection failed", e); stopLiveSession(); alert("Error al conectar con Gemini Live API."); }
+  const getRemainingVoiceSeconds = () => {
+      if (!user?.voiceUsageSeconds) return 120;
+      return Math.max(0, 120 - user.voiceUsageSeconds);
   };
 
-  // --- PRIVATE CHAT METHODS ---
+  // Private Chat
   const startPrivateChat = async (targetUserId: string) => {
       if (!user) return;
       const targetUser = allUsers.find(u => u.id === targetUserId);
       if (!targetUser) return;
 
-      // Canonical ID: Ensure strictly one ID per pair of users (A_B or B_A)
-      const chatId = user.id < targetUserId ? `${user.id}_${targetUserId}` : `${targetUserId}_${user.id}`;
-      const chatRef = doc(db, 'private_chats', chatId);
-
-      try {
-          // 1. Check if chat already exists
-          const chatSnap = await getDoc(chatRef);
-
-          if (chatSnap.exists()) {
-              const data = chatSnap.data() as PrivateChatSession;
-              
-              if (data.isActive) {
-                  // 2a. If ACTIVE, just open it locally without touching Firestore
-                  // This prevents overwriting the session if it's already running
-                  setActivePrivateChat({ session: { ...data, id: chatId }, messages: [] });
-                  // The useEffect listener will fetch messages automatically
-              } else {
-                  // 2b. If INACTIVE (closed previously), Reactivate it
-                  // We update the creator to the current user so they have control
-                  await updateDoc(chatRef, {
-                      isActive: true,
-                      creatorId: user.id,
-                      targetId: targetUserId,
-                      creatorName: user.name,
-                      targetName: targetUser.name,
-                      typing: {} // Reset typing status
-                  });
-              }
-          } else {
-              // 3. If DOES NOT EXIST, Create new
-              const sessionData: PrivateChatSession = {
-                  id: chatId,
-                  creatorId: user.id,
-                  targetId: targetUserId,
-                  creatorName: user.name,
-                  targetName: targetUser.name,
-                  isActive: true,
-                  createdAt: Date.now(),
-                  typing: {}
-              };
-              await setDoc(chatRef, sessionData);
-          }
-      } catch (e) { console.error("Error creating/joining chat", e); }
+      const sessionId = [user.id, targetUserId].sort().join('_');
+      const session: PrivateChatSession = {
+          id: sessionId,
+          creatorId: user.id,
+          targetId: targetUserId,
+          creatorName: user.name,
+          targetName: targetUser.name,
+          isActive: true,
+          createdAt: Date.now()
+      };
+      setActivePrivateChat({ session, messages: [] });
   };
 
-  // IMPROVED CLOSE LOGIC
-  const closePrivateChat = async () => {
-      if (!activePrivateChat) return;
-      
-      const chatId = activePrivateChat.session.id; // Capture ID immediately
-      const currentUserName = user?.name || "Anfitrión";
-      const currentUserId = user?.id || "system";
-
-      try {
-          // 1. Send system message DIRECTLY to ensure it goes to the correct collection
-          const msg: PrivateChatMessage = {
-              id: `msg_${Date.now()}`,
-              senderId: currentUserId,
-              senderName: currentUserName,
-              text: "La sala ha sido cerrada por el anfitrión.",
-              timestamp: Date.now(),
-              type: 'system'
-          };
-          await addDoc(collection(db, `private_chats/${chatId}/messages`), msg);
-          
-          // 2. Wait a moment then disable room
-          setTimeout(async () => {
-              try {
-                await updateDoc(doc(db, 'private_chats', chatId), { isActive: false });
-                setActivePrivateChat(null);
-              } catch(err) { console.error(err); }
-          }, 2000); 
-          
-      } catch(e) { console.error("Error closing chat", e); }
-  };
-
-  const leavePrivateChat = async () => {
-      if (!user || !activePrivateChat) return;
-      try {
-          await sendPrivateMessage(`${user.name} ha abandonado la sala.`, 'system');
-          setActivePrivateChat(null);
-      } catch(e) { console.error("Error leaving chat", e); }
-  };
-
-  const sendPrivateMessage = async (text: string, type: 'text' | 'system' = 'text') => {
-      if (!user || !activePrivateChat) return;
+  const sendPrivateMessage = async (text: string) => {
+      if (!activePrivateChat || !user) return;
       const msg: PrivateChatMessage = {
-          id: `msg_${Date.now()}`,
+          id: Date.now().toString(),
           senderId: user.id,
           senderName: user.name,
-          text: text,
-          timestamp: Date.now(),
-          type: type
+          text,
+          timestamp: Date.now()
       };
-      try {
-          await addDoc(collection(db, `private_chats/${activePrivateChat.session.id}/messages`), msg);
-      } catch (e) { console.error("Error sending private msg", e); }
+      setActivePrivateChat(prev => prev ? { ...prev, messages: [...prev.messages, msg] } : null);
   };
 
-  const setPrivateChatTyping = async (isTyping: boolean) => {
-      if (!user || !activePrivateChat) return;
-      try {
-          await updateDoc(doc(db, 'private_chats', activePrivateChat.session.id), {
-              [`typing.${user.id}`]: isTyping
-          });
-      } catch (e) { console.error("Error setting typing status", e); }
-  };
+  const closePrivateChat = () => setActivePrivateChat(null);
+  const leavePrivateChat = () => setActivePrivateChat(null);
+  const setPrivateChatTyping = (isTyping: boolean) => {};
 
-  // --- ACTIONS ---
-  const setTmdbToken = async (token: string) => { await setDoc(doc(db, 'config', 'tmdb'), { token }); setTmdbTokenState(token); };
-  const login = async (email: string, name: string) => { try { await signInWithEmailAndPassword(auth, email, name); return { success: true, message: 'Bienvenido' }; } catch (e: any) { return { success: false, message: e.message }; } };
-  const logout = async () => { await signOut(auth); };
-  
-  const register = async (email: string, name: string, password: string) => {
-      try {
-          const cred = await createUserWithEmailAndPassword(auth, email, password);
-          const newUser: User = { 
-              id: cred.user.uid, 
-              email: email, 
-              name: name, 
-              avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`, 
-              watchedMovies: [], 
-              watchlist: [], 
-              status: 'pending', 
-              isAdmin: false, 
-              xp: 0, 
-              level: 1, 
-              credits: 0, 
-              completedMissions: [], 
-              inventory: [], 
-              lastLevelUpTimestamp: Date.now() 
-          };
-          await setDoc(doc(db, 'users', cred.user.uid), newUser);
-          await signOut(auth);
-          return { success: true, message: 'Registro exitoso. Tu cuenta está pendiente de aprobación por un administrador. Podrás acceder cuando sea validada.' };
-      } catch (e: any) { return { success: false, message: e.message }; }
-  };
-
-  const resetPassword = async (email: string) => { try { await sendPasswordResetEmail(auth, email); return { success: true, message: 'Correo enviado.' }; } catch (e: any) { return { success: false, message: e.message }; } };
-  const updateUserProfile = async (name: string, avatarUrl: string) => { if (!user) return; await updateDoc(doc(db, 'users', user.id), { name, avatarUrl }); const updatedUser = { ...user, name, avatarUrl }; checkAchievements(updatedUser); };
-  const approveUser = async (userId: string) => { 
-      await updateDoc(doc(db, 'users', userId), { status: 'active' }); 
-      // Send Welcome Message to Mailbox
-      sendSystemMessage(userId, "¡Bienvenido a Cine Mensa!", "Tu cuenta ha sido aprobada por el administrador. Ya puedes disfrutar de todas las funciones, votar en eventos y completar misiones.", 'system');
-  };
-  const rejectUser = async (userId: string) => { await updateDoc(doc(db, 'users', userId), { status: 'rejected' }); };
-  const setView = (view: ViewState, id?: string | number) => { 
-      setCurrentView(view); 
-      if (id) {
-          if (typeof id === 'string') {
-              setSelectedMovieId(id);
-              setSelectedPersonId(null);
-          } else {
-              setSelectedPersonId(id);
-              setSelectedMovieId(null);
-          }
-      }
-  };
-  const addMovie = async (movie: Movie) => { const existingRef = doc(db, 'movies', movie.id); await setDoc(existingRef, movie); };
-  const getMovie = (id: string) => movies.find(m => m.id === id);
-  const rateMovie = async (movieId: string, rating: DetailedRating, comment?: string, spoiler?: string) => {
+  // Trivia
+  const inviteToTrivia = (targetUserId: string) => {
       if (!user) return;
-      const ratingDocId = `${user.id}_${movieId}`;
-      const ratingData: UserRating = { userId: user.id, movieId: movieId, rating: rating.average, detailed: rating, comment: comment, spoiler: spoiler, timestamp: Date.now(), likes: [], dislikes: [] };
-      await setDoc(doc(db, 'ratings', ratingDocId), ratingData);
-      if (!user.watchedMovies.includes(movieId)) { await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayUnion(movieId), watchlist: arrayRemove(movieId) }); }
-      const movieRatings = userRatings.filter(r => r.movieId === movieId && r.userId !== user.id).concat(ratingData);
-      const avg = movieRatings.reduce((acc, r) => acc + r.rating, 0) / movieRatings.length;
-      await updateDoc(doc(db, 'movies', movieId), { rating: avg, totalVotes: movieRatings.length });
-      const updatedUser = { ...user };
-      if (!updatedUser.watchedMovies.includes(movieId)) updatedUser.watchedMovies.push(movieId);
-      checkAchievements(updatedUser);
-  };
-  const unwatchMovie = async (movieId: string) => { if (!user) return; const ratingDocId = `${user.id}_${movieId}`; await deleteDoc(doc(db, 'ratings', ratingDocId)); await updateDoc(doc(db, 'users', user.id), { watchedMovies: arrayRemove(movieId) }); const movieRatings = userRatings.filter(r => r.movieId === movieId && r.userId !== user.id); const avg = movieRatings.length > 0 ? movieRatings.reduce((acc, r) => acc + r.rating, 0) / movieRatings.length : 0; await updateDoc(doc(db, 'movies', movieId), { rating: avg, totalVotes: movieRatings.length }); };
-  const toggleWatchlist = async (movieId: string) => { if (!user) return; if (user.watchlist.includes(movieId)) { await updateDoc(doc(db, 'users', user.id), { watchlist: arrayRemove(movieId) }); } else { await updateDoc(doc(db, 'users', user.id), { watchlist: arrayUnion(movieId) }); triggerAction('watchlist'); } };
-  
-  const toggleReviewVote = async (targetUserId: string, movieId: string, voteType: 'like' | 'dislike') => {
-      if (!user) return;
-      const ratingId = `${targetUserId}_${movieId}`;
-      const ratingRef = doc(db, 'ratings', ratingId);
-      const ratingDoc = await getDoc(ratingRef);
-      if (!ratingDoc.exists()) return;
-      const data = ratingDoc.data() as UserRating;
-      const likes = data.likes || [];
-      const dislikes = data.dislikes || [];
-      if (voteType === 'like') {
-          if (likes.includes(user.id)) { await updateDoc(ratingRef, { likes: arrayRemove(user.id) }); } else { await updateDoc(ratingRef, { likes: arrayUnion(user.id), dislikes: arrayRemove(user.id) }); }
-      } else {
-          if (dislikes.includes(user.id)) { await updateDoc(ratingRef, { dislikes: arrayRemove(user.id) }); } else { await updateDoc(ratingRef, { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) }); }
-      }
+      const targetUser = allUsers.find(u => u.id === targetUserId);
+      if (!targetUser) return;
+
+      const matchId = `match_${Date.now()}`;
+      const newMatch: TriviaMatch = {
+          id: matchId,
+          players: {
+              [user.id]: { id: user.id, name: user.name, avatarUrl: user.avatarUrl, score: 0, hasAnswered: false },
+              [targetUserId]: { id: targetUser.id, name: targetUser.name, avatarUrl: targetUser.avatarUrl, score: 0, hasAnswered: false }
+          },
+          currentQuestion: null,
+          round: 0,
+          status: 'waiting',
+          createdAt: Date.now()
+      };
       
-      await updateDoc(doc(db, 'users', user.id), {
-          'gamificationStats.social_interactions': increment(1)
-      });
-      const u = { ...user, gamificationStats: { ...user.gamificationStats, social_interactions: (user.gamificationStats?.social_interactions || 0) + 1 } };
-      checkAchievements(u);
+      setActiveTriviaMatch(newMatch);
+      sendSystemMessage(targetUserId, "Desafío de Trivial", `${user.name} te ha invitado a un duelo de cine.`, 'info');
   };
 
-  const createEvent = async (eventData: Partial<CineEvent>) => { if (activeEvent) { await closeEvent(activeEvent.id); } const newEvent: CineEvent = { id: `evt_${Date.now()}`, themeTitle: eventData.themeTitle || 'Evento', themeDescription: eventData.themeDescription || '', aiReasoning: eventData.aiReasoning || '', backdropUrl: eventData.backdropUrl, phase: 'voting', startDate: Date.now(), votingDeadline: Date.now() + 7 * 24 * 60 * 60 * 1000, viewingDeadline: Date.now() + 14 * 24 * 60 * 60 * 1000, candidates: eventData.candidates || [], committedViewers: [], committedDebaters: [] }; await setDoc(doc(db, 'events', newEvent.id), newEvent); setActiveEvent(newEvent); };
-  const closeEvent = async (eventId: string) => { await updateDoc(doc(db, 'events', eventId), { phase: 'closed' }); setActiveEvent(null); };
-  const voteForCandidate = async (eventId: string, tmdbId: number) => { 
-      if (!user || !activeEvent) return; 
-      const updatedCandidates = activeEvent.candidates.map(c => { const newVotes = c.votes.filter(uid => uid !== user.id); if (c.tmdbId === tmdbId) { newVotes.push(user.id); } return { ...c, votes: newVotes }; }); await updateDoc(doc(db, 'events', eventId), { candidates: updatedCandidates }); 
-      triggerAction('vote_event');
-  };
-  const transitionEventPhase = async (eventId: string, phase: EventPhase, winnerId?: number) => { const updateData: any = { phase }; if (winnerId) updateData.winnerTmdbId = winnerId; await updateDoc(doc(db, 'events', eventId), updateData); };
-  const sendEventMessage = async (eventId: string, text: string, role: 'user' | 'moderator' = 'user', audioBase64?: string) => { if (!user && role === 'user') return; const msg: EventMessage = { id: `msg_${Date.now()}_${Math.random()}`, userId: role === 'user' ? user!.id : 'system', userName: role === 'user' ? user!.name : 'Presentadora IA', userAvatar: role === 'user' ? user!.avatarUrl : 'https://cdn-icons-png.flaticon.com/512/4712/4712035.png', text, timestamp: Date.now(), role, audioBase64 }; await addDoc(collection(db, `events/${eventId}/messages`), msg); };
-  const toggleEventCommitment = async (eventId: string, type: 'view' | 'debate') => { if (!user) return; const field = type === 'view' ? 'committedViewers' : 'committedDebaters'; const list = activeEvent?.[field] || []; if (list.includes(user.id)) { await updateDoc(doc(db, 'events', eventId), { [field]: arrayRemove(user.id) }); } else { await updateDoc(doc(db, 'events', eventId), { [field]: arrayUnion(user.id) }); } };
-  const toggleTimeVote = async (eventId: string, timeSlot: string) => { if (!user || !activeEvent) return; const currentVotes = activeEvent.timeVotes || {}; const slotVotes = currentVotes[timeSlot] || []; let newSlotVotes; if (slotVotes.includes(user.id)) { newSlotVotes = slotVotes.filter(uid => uid !== user.id); } else { newSlotVotes = [...slotVotes, user.id]; } const newVotes = { ...currentVotes, [timeSlot]: newSlotVotes }; await updateDoc(doc(db, 'events', eventId), { timeVotes: newVotes }); };
-  const raiseHand = async (eventId: string) => { if (!user) return; await updateDoc(doc(db, 'events', eventId), { speakerQueue: arrayUnion(user.id) }); };
-  const grantTurn = async (eventId: string, userId: string) => { await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: userId, speakerQueue: arrayRemove(userId) }); };
-  const releaseTurn = async (eventId: string) => { await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: null }); };
-  
-  const sendFeedback = async (type: 'bug' | 'feature', text: string) => {
-      if (!user) return;
-      await addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() });
-      await updateDoc(doc(db, 'users', user.id), {
-          'gamificationStats.feedback_count': increment(1)
-      });
-      const u = { ...user, gamificationStats: { ...user.gamificationStats, feedback_count: (user.gamificationStats?.feedback_count || 0) + 1 } };
-      checkAchievements(u);
-  };
-  
-  const resolveFeedback = async (feedbackId: string, response?: string) => { await updateDoc(doc(db, 'feedback', feedbackId), { status: 'solved', adminResponse: response }); const fb = feedbackList.find(f => f.id === feedbackId); if (fb) { await publishNews(fb.type === 'bug' ? '🐛 Bug Exterminado' : '✨ Nueva Funcionalidad', `Gracias al reporte de ${fb.userName}, hemos solucionado: "${fb.text}".`, 'update'); } };
-  const deleteFeedback = async (id: string) => { await deleteDoc(doc(db, 'feedback', id)); };
-  
-  // FIX: Ensure imageUrl is null if undefined
-  const publishNews = async (title: string, content: string, type: 'general' | 'update' | 'event', imageUrl?: string) => { 
-      await addDoc(collection(db, 'news'), { title, content, type, imageUrl: imageUrl || null, timestamp: Date.now() }); 
-  };
-  
-  const deleteNews = async (id: string) => { 
-      try {
-          const newsRef = doc(db, 'news', id);
-          const snap = await getDoc(newsRef);
-          
-          if (snap.exists()) {
-              const newsData = snap.data();
-              if (newsData.title) {
-                  const configRef = doc(db, 'config', 'news_automation');
-                  const configSnap = await getDoc(configRef);
-                  if (configSnap.exists()) {
-                      await updateDoc(configRef, {
-                          bannedTitles: arrayUnion(newsData.title)
-                      });
-                  } else {
-                      await setDoc(configRef, { bannedTitles: [newsData.title] }, { merge: true });
-                  }
-              }
-          }
-          await deleteDoc(newsRef); 
-      } catch (e) {
-          console.error("Error deleting news:", e);
-      }
-  };
-
-  const getEpisodeCount = async (): Promise<number> => { const coll = collection(db, 'events'); const snap = await getCountFromServer(coll); return snap.data().count + 1; };
-
-  const value: DataContextType = {
-    user, allUsers, movies, userRatings, activeEvent, eventMessages, news, feedbackList, currentView, selectedMovieId, selectedPersonId, tmdbToken, topCriticId, getRemainingVoiceSeconds, liveSession, startLiveSession, stopLiveSession, setTmdbToken, login, logout, register, resetPassword, updateUserProfile, approveUser, rejectUser, setView, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote, addMovie, getMovie, createEvent, closeEvent, voteForCandidate, transitionEventPhase, sendEventMessage, toggleEventCommitment, toggleTimeVote, raiseHand, grantTurn, releaseTurn, sendFeedback, resolveFeedback, publishNews, deleteNews, deleteFeedback, getEpisodeCount, notification, clearNotification, earnCredits, spendCredits, milestoneEvent, closeMilestoneModal, initialProfileTab, setInitialProfileTab, resetGamification, resetAutomation, triggerAction, completeLevelUpChallenge, automationStatus, activePrivateChat, startPrivateChat, closePrivateChat, leavePrivateChat, sendPrivateMessage, toggleInventoryItem, setPrivateChatTyping, mailbox, sendSystemMessage, markMessageRead, deleteMessage, auditQuality
-  };
-
-  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
-};
-
-export const useData = () => {
-  const context = useContext(DataContext);
-  if (context === undefined) {
-    throw new Error('useData must be used within a DataProvider');
+  const updateTriviaMatchState = (newState: Partial<TriviaMatch>) => {
+      setActiveTriviaMatch(prev => prev ? { ...prev, ...newState } : null);
   }
-  return context;
+
+  const handleTriviaWin = async (winnerId: string) => {
+      if (winnerId === user?.id) {
+          const userRef = doc(db, 'users', user.id);
+          await updateDoc(userRef, { duelWins: increment(1) });
+          checkMissions(user.id);
+      }
+  }
+
+  const saveTriviaHighScore = async (score: number) => {
+      if (!user) return;
+      const currentHigh = user.triviaHighScore || 0;
+      if (score > currentHigh) {
+          const userRef = doc(db, 'users', user.id);
+          await updateDoc(userRef, { triviaHighScore: score });
+      }
+  }
+
+  const endTriviaMatchLocal = () => setActiveTriviaMatch(null);
+
+  // User Profile
+  const updateUserProfile = async (name: string, avatarUrl: string) => {
+      if (!user) return;
+      await updateDoc(doc(db, 'users', user.id), { name, avatarUrl });
+  };
+
+  const triggerAction = async (actionId: string) => {
+      if (!user) return;
+      const key = `gamificationStats.${actionId}`;
+      if (['use_ai', 'use_ai_chat', 'read_news', 'visit_ranking', 'search', 'update_avatar', 'feedback'].includes(actionId)) {
+          await updateDoc(doc(db, 'users', user.id), { [key]: true });
+      }
+      checkMissions(user.id);
+  };
+
+  const spendCredits = async (amount: number, itemId: string) => {
+      if (!user || user.credits < amount) return false;
+      await updateDoc(doc(db, 'users', user.id), {
+          credits: increment(-amount),
+          inventory: arrayUnion(itemId)
+      });
+      setNotification({ type: 'shop', message: '¡Compra realizada con éxito!' });
+      return true;
+  };
+
+  const toggleInventoryItem = async (itemId: string) => {
+      if (!user) return;
+      if (user.inventory?.includes(itemId)) {
+          await updateDoc(doc(db, 'users', user.id), { inventory: arrayRemove(itemId) });
+      } else {
+          await updateDoc(doc(db, 'users', user.id), { inventory: arrayUnion(itemId) });
+      }
+  }
+
+  const completeLevelUpChallenge = async (level: number, reward: number) => {
+      if (!user) return;
+      await updateDoc(doc(db, 'users', user.id), {
+          credits: increment(reward),
+          level: Math.max(user.level, level)
+      });
+      setNotification({ type: 'level', message: `¡Nivel ${level} Alcanzado! +${reward} Créditos` });
+  };
+
+  const clearNotification = () => setNotification(null);
+  const closeMilestoneModal = () => setMilestoneEvent(null);
+
+  const value: any = {
+    user, allUsers, movies, userRatings, news, feedbackList, activeEvent, eventMessages, mailbox,
+    currentView, selectedMovieId, selectedPersonId, initialProfileTab,
+    tmdbToken, notification, milestoneEvent, automationStatus,
+    liveSession, topCriticId, activePrivateChat,
+    // Trivia State & Functions
+    activeTriviaMatch, inviteToTrivia, updateTriviaMatchState, endTriviaMatchLocal, handleTriviaWin, saveTriviaHighScore,
+    
+    setView, login, register, logout, resetPassword,
+    addMovie, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote,
+    approveUser, rejectUser, deleteUserAccount, toggleUserAdmin, updateUserProfile,
+    setTmdbToken, sendSystemMessage, markMessageRead, deleteMessage,
+    publishNews, deleteNews, sendFeedback, resolveFeedback, deleteFeedback,
+    resetGamification, resetAutomation, auditQuality,
+    createEvent, closeEvent, voteForCandidate, transitionEventPhase, toggleEventCommitment, toggleTimeVote, proposeMeetupLocation, voteMeetupLocation,
+    sendEventMessage, raiseHand, grantTurn, releaseTurn, getEpisodeCount,
+    startLiveSession, stopLiveSession, getRemainingVoiceSeconds,
+    startPrivateChat, sendPrivateMessage, closePrivateChat, leavePrivateChat, setPrivateChatTyping,
+    spendCredits, toggleInventoryItem, completeLevelUpChallenge,
+    triggerAction, setInitialProfileTab, clearNotification, closeMilestoneModal
+  };
+
+  return (
+    <DataContext.Provider value={value}>
+      {children}
+    </DataContext.Provider>
+  );
 };

@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User, TriviaQuestion } from "../types";
 import { findMovieByTitleAndYear, getImageUrl, searchPersonTMDB } from "./tmdbService";
@@ -9,6 +10,62 @@ const ai = new GoogleGenAI({ apiKey });
 // Helper to check if API is usable
 const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
+};
+
+// --- MAPS PLACE SEARCH (NEW) ---
+export const searchPlacesWithMaps = async (query: string): Promise<{ name: string, address: string, uri: string }[]> => {
+    if (!isAiAvailable()) return [];
+
+    const prompt = `
+        Busca lugares reales que coincidan con: "${query}".
+        Devuelve una lista con el nombre, la dirección y un enlace.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                tools: [{ googleMaps: {} }]
+            }
+        });
+
+        // Parse Grounding Metadata to get the URI
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        
+        if (!chunks || chunks.length === 0) return [];
+
+        // Simple parsing of text to match chunks roughly, or just return chunks data
+        // Since prompt is simple, we rely on chunks mostly.
+        // Google Maps tool returns chunks with source.
+        
+        const places: { name: string, address: string, uri: string }[] = [];
+        
+        // Manual parsing from text response if structured well, or fallback to first chunk if relevant
+        // Better approach for Maps tool:
+        // The tool output is embedded in the text usually, but groundingChunks contain the structured data.
+        
+        // Let's rely on the textual response + chunks.
+        // Ideally we would use function calling for structured data, but maps tool is retrieval.
+        // We will mock structure extraction or return available grounding data.
+        
+        // Iterate grounding chunks
+        chunks.forEach((chunk: any) => {
+            if (chunk.web?.uri && (chunk.web.uri.includes('google.com/maps') || chunk.web.uri.includes('goo.gl'))) {
+                places.push({
+                    name: chunk.web.title || "Lugar en Mapa",
+                    address: "Ver en mapa",
+                    uri: chunk.web.uri
+                });
+            }
+        });
+
+        return places;
+
+    } catch (e) {
+        console.error("Maps Search Error:", e);
+        return [];
+    }
 };
 
 // --- VISUAL TIMELINE GENERATOR (NEW - VISION API) ---

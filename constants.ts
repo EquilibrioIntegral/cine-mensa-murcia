@@ -1,6 +1,6 @@
 
 import { Movie, UserRating, Rank, Mission, User, ShopItem, LevelChallenge } from "./types";
-import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot, MessageCircle } from 'lucide-react';
+import { User as UserIcon, Star, Video, MessageSquare, Heart, Skull, Camera, Ticket, Zap, Laugh, BookOpen, Rocket, Crown, Palette, Megaphone, Film, Coffee, Armchair, Users, UserPlus, Clapperboard, PenTool, Briefcase, Globe, Award, Scroll, Glasses, Bug, Search, ListVideo, Sparkles, Trophy, Radar, ThumbsUp, Newspaper, Bot, MessageCircle, Swords, Handshake, Vote } from 'lucide-react';
 
 export const MIN_REVIEW_WORDS = 50;
 
@@ -191,7 +191,7 @@ export const LEVEL_CHALLENGES: LevelChallenge[] = [
     { 
         level: 3, 
         title: "Comprar un Proyector", 
-        synopsis: "Tras trabajar en el cine, decides montar tu propio 'Cine en Casa'. Vas a ver a un viejo montador que conociste, con la esperanza de comprarle un proyector usado. Su taller es un caos: tiene el suelo lleno de tiras de celuloide desordenadas. Si le ayudas a ordenar las escenas de 3 películas cronológicamente, te regalará el proyector y 100 créditos por el trabajo. (Requisito: Tener al menos 5 películas vistas en tu historial).",
+        synopsis: "Tras trabajar en el Cine Capitol, decides montar tu propio 'Cine en Casa'. Vas a ver a un viejo montador que conociste, con la esperanza de comprarle un proyector usado. Su taller es un caos: tiene el suelo lleno de tiras de celuloide desordenadas. Si le ayudas a ordenar las escenas de 3 películas cronológicamente, te regalará el proyector y 100 créditos por el trabajo. (Requisito: Tener al menos 5 películas vistas en tu historial).",
         imagePrompt: "messy film editor room, strips of celluloid film on the floor, vintage film projector on a table, dust motes in light beam, atmospheric clutter, cinematic lighting",
         type: 'timeline', 
         rewardCredits: 100,
@@ -220,11 +220,10 @@ export const RANKS: Rank[] = [
 
 export const MISSIONS: Mission[] = [
     // --- NIVEL 1 (Misiones para alcanzar Nivel 2 - 100 XP) ---
-    // Total XP disponible: 100
     {
         id: 'm_rate',
         rankId: 'rank_1',
-        title: 'Primera Claqueta (Subir a Nivel 2)',
+        title: 'Primera Claqueta',
         description: 'Marca una película como vista y dale una puntuación.',
         xpReward: 20,
         icon: Star,
@@ -233,7 +232,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_review',
         rankId: 'rank_1',
-        title: 'Pluma Afilada (Subir a Nivel 2)',
+        title: 'Pluma Afilada',
         description: 'Escribe tu primera reseña escrita.',
         xpReward: 20,
         icon: MessageSquare,
@@ -242,7 +241,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_avatar',
         rankId: 'rank_1',
-        title: 'Nueva Identidad (Subir a Nivel 2)',
+        title: 'Nueva Identidad',
         description: 'Cambia tu avatar por defecto por uno de actor o actriz.',
         xpReward: 10,
         icon: Camera,
@@ -251,7 +250,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_watchlist',
         rankId: 'rank_1',
-        title: 'Futuros Proyectos (Subir a Nivel 2)',
+        title: 'Futuros Proyectos',
         description: 'Añade una película a tu lista de pendientes.',
         xpReward: 10,
         icon: ListVideo,
@@ -260,7 +259,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_events',
         rankId: 'rank_1',
-        title: 'Vida Social (Subir a Nivel 2)',
+        title: 'Vida Social',
         description: 'Visita la sección de Eventos/Cineforum.',
         xpReward: 10,
         icon: Ticket,
@@ -269,7 +268,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_ai',
         rankId: 'rank_1',
-        title: 'Consultando al Oráculo (Subir a Nivel 2)',
+        title: 'Consultando al Oráculo',
         description: 'Pide una recomendación de película a la IA.',
         xpReward: 10,
         icon: Sparkles,
@@ -278,7 +277,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_feedback',
         rankId: 'rank_1',
-        title: 'Crítico Constructivo (Subir a Nivel 2)',
+        title: 'Crítico Constructivo',
         description: 'Envía una sugerencia o reporte de bug en la sección de Feedback.',
         xpReward: 10,
         icon: Bug,
@@ -287,7 +286,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_search',
         rankId: 'rank_1',
-        title: 'Buscador de Tesoros (Subir a Nivel 2)',
+        title: 'Buscador de Tesoros',
         description: 'Usa el buscador para encontrar una película en la base de datos.',
         xpReward: 5,
         icon: Search,
@@ -296,7 +295,7 @@ export const MISSIONS: Mission[] = [
     {
         id: 'm_ranking',
         rankId: 'rank_1',
-        title: 'Estudiando a los Grandes (Subir a Nivel 2)',
+        title: 'Estudiando a los Grandes',
         description: 'Visita el Ranking de películas y críticos.',
         xpReward: 5,
         icon: Trophy,
@@ -304,81 +303,113 @@ export const MISSIONS: Mission[] = [
     },
 
     // --- NIVEL 2 (Misiones para alcanzar Nivel 3 - 100 XP) ---
-    // Total XP disponible: 100
+    // Total XP necesario para Nivel 3: 200 (Ya tienes 100 de Nivel 1).
+    // Estas 10 misiones suman 100 XP.
+    
+    // 1. Tertuliano (10 XP)
+    {
+        id: 'm_lvl2_tertuliano',
+        rankId: 'rank_1',
+        title: 'Tertuliano',
+        description: 'Participa activamente en un Cineforum (chat, compromiso o debate).',
+        xpReward: 10,
+        icon: Handshake,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['cineforum_participation']
+    },
+    // 2. Duelo de Titanes (10 XP)
+    {
+        id: 'm_lvl2_duel',
+        rankId: 'rank_1',
+        title: 'Duelo de Titanes',
+        description: 'Gana una partida de Trivial Online 1 contra 1.',
+        xpReward: 10,
+        icon: Swords,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && (user.duelWins || 0) > 0
+    },
+    // 3. Crítico en Ciernes (10 XP)
     {
         id: 'm_lvl2_rate_5',
         rankId: 'rank_1', 
-        title: 'Crítico en Ciernes (Subir a Nivel 3)',
-        description: 'Valora 5 películas NUEVAS desde que subiste a nivel 2.',
-        xpReward: 20,
+        title: 'Crítico en Ciernes',
+        description: 'Valora 5 películas NUEVAS.',
+        xpReward: 10,
         icon: Star,
         minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.ratingsCount >= 5
     },
+    // 4. Columnista (10 XP)
     {
         id: 'm_lvl2_review_5',
         rankId: 'rank_1',
-        title: 'Columnista (Subir a Nivel 3)',
+        title: 'Columnista',
         description: 'Escribe reseñas para 5 películas nuevas.',
-        xpReward: 20,
+        xpReward: 10,
         icon: PenTool,
         minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.reviewsCount >= 5
     },
+    // 5. Beta Tester (10 XP)
     {
-        id: 'm_lvl2_feedback_5',
+        id: 'm_lvl2_beta_tester',
         rankId: 'rank_1',
-        title: 'Beta Tester (Subir a Nivel 3)',
+        title: 'Beta Tester',
         description: 'Envía 5 reportes de bug o ideas de mejora.',
         xpReward: 10,
         icon: Bug,
         minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['feedback_count'] || 0) >= 5
+        condition: (user, stats) => (user.level || 1) >= 2 && stats.feedbackCount >= 5
     },
+    // 6. Espíritu de Equipo (10 XP)
     {
         id: 'm_lvl2_social',
         rankId: 'rank_1',
-        title: 'Espíritu de Equipo (Subir a Nivel 3)',
+        title: 'Espíritu de Equipo',
         description: 'Da Like o Dislike a 5 reseñas de otros usuarios.',
         xpReward: 10,
         icon: ThumbsUp,
         minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['social_interactions'] || 0) >= 5
+        condition: (user, stats) => (user.level || 1) >= 2 && stats.likesGiven >= 5
     },
+    // 7. Voto Democrático (10 XP)
     {
         id: 'm_lvl2_vote',
         rankId: 'rank_1',
-        title: 'Voto Democrático (Subir a Nivel 3)',
+        title: 'Voto Democrático',
         description: 'Vota por una película candidata en el Cineforum.',
         xpReward: 10,
-        icon: Ticket,
+        icon: Vote,
         minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['vote_event']
+        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['cineforumVoteCount'] || 0) >= 1
     },
+    // 8. Futuro Digital (10 XP)
     {
-        id: 'm_lvl2_ai_chat',
+        id: 'm_lvl2_ai_future',
         rankId: 'rank_1',
-        title: 'Futuro Digital (Subir a Nivel 3)',
+        title: 'Futuro Digital',
         description: 'Usa el chat avanzado o de voz con la IA.',
         xpReward: 10,
         icon: Bot,
         minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['use_ai_chat']
     },
+    // 9. Bien Informado (10 XP)
     {
         id: 'm_lvl2_news',
         rankId: 'rank_1',
-        title: 'Bien Informado (Subir a Nivel 3)',
+        title: 'Bien Informado',
         description: 'Lee una noticia completa (expandir leer más).',
         xpReward: 10,
         icon: Newspaper,
         minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['read_news']
     },
+    // 10. Agenda Llena (10 XP)
     {
         id: 'm_lvl2_watchlist_5',
         rankId: 'rank_1',
-        title: 'Agenda Llena (Subir a Nivel 3)',
+        title: 'Agenda Llena',
         description: 'Ten al menos 5 películas en tu lista de pendientes.',
         xpReward: 10,
         icon: ListVideo,
@@ -391,7 +422,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     {
         id: 'item_online_tracker',
         title: 'Radar de Usuarios Online',
-        description: 'Añade un widget a tu pantalla de inicio que te muestra en tiempo real quién está conectado en la web.',
+        description: 'Añade un widget a tu pantalla de inicio que te muestra en tiempo real quién está conectado en la web. Desbloquea el modo Duelo 1v1.',
         cost: 100,
         minLevel: 1,
         icon: Radar,

@@ -1,5 +1,4 @@
 
-
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Mail, Trash2, CheckCircle, Bell, Info, Shield, ShoppingBag, ChevronDown, ChevronUp, AlertCircle, Inbox, ArrowRight } from 'lucide-react';
@@ -29,9 +28,13 @@ const Mailbox: React.FC = () => {
       }
   };
 
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      deleteMessage(id);
+      try {
+          await deleteMessage(id);
+      } catch (error) {
+          alert("Error al eliminar el mensaje");
+      }
   };
 
   const handleAction = (e: React.MouseEvent, movieId: string) => {

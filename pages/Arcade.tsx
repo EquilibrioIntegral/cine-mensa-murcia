@@ -2,23 +2,30 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { LEVEL_CHALLENGES, XP_TABLE } from '../constants';
-import { Gamepad2, Lock, Play, Ticket, HelpCircle, Trophy, Star, ChevronDown, CheckCircle, Skull, X, AlertTriangle, Shield } from 'lucide-react';
+import { Gamepad2, Lock, Play, Ticket, HelpCircle, Trophy, Star, ChevronDown, CheckCircle, Skull, X, AlertTriangle, Shield, Swords, User, Zap } from 'lucide-react';
 import RankBadge from '../components/RankBadge';
 import { LevelChallenge, ViewState } from '../types';
 import TriviaGame from '../components/TriviaGame';
 import TimelineGame from '../components/TimelineGame'; // Import new game
+import OnlineUsersWidget from '../components/OnlineUsersWidget';
 
 const Arcade: React.FC = () => {
-  const { user, completeLevelUpChallenge, setView } = useData();
+  const { user, completeLevelUpChallenge, setView, inviteToTrivia } = useData();
   const [selectedChallenge, setSelectedChallenge] = useState<LevelChallenge | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [gameMode, setGameMode] = useState<'normal' | 'solo_survival' | 'online_duel'>('normal');
+  const [showDuelInvite, setShowDuelInvite] = useState(false);
+  const [selectedOpponent, setSelectedOpponent] = useState<{id: string, name: string, avatarUrl: string} | null>(null);
 
   if (!user) return null;
 
   const currentLevel = user.level || 1;
   const currentXP = user.xp || 0;
 
-  const handleStartGame = () => {
+  // Check if user has reached level 2 or higher (which implies they beat the level 1 challenge)
+  const hasBeatenLevel2 = user.level >= 2;
+
+  const handleStartGame = (mode: 'normal' | 'solo_survival' | 'online_duel' = 'normal') => {
       if (!selectedChallenge) return;
 
       // Special Check for Timeline Game (Level 3)
@@ -31,6 +38,7 @@ const Arcade: React.FC = () => {
           }
       }
 
+      setGameMode(mode);
       setIsPlaying(true);
   };
 
@@ -39,8 +47,10 @@ const Arcade: React.FC = () => {
       
       setIsPlaying(false);
       setSelectedChallenge(null);
+      setGameMode('normal');
+      setSelectedOpponent(null);
 
-      if (passed) {
+      if (passed && gameMode === 'normal') {
           // Logic: Only award first time completion if user is blocked by level cap
           if (currentLevel < selectedChallenge.level) {
               completeLevelUpChallenge(selectedChallenge.level, selectedChallenge.rewardCredits);
@@ -54,6 +64,8 @@ const Arcade: React.FC = () => {
           setView(ViewState.SHOP);
       }
   };
+
+  const hasRadar = user.inventory?.includes('item_online_tracker');
 
   return (
     <div className="container mx-auto px-4 py-8 pb-20">
@@ -71,6 +83,8 @@ const Arcade: React.FC = () => {
                   challenge={selectedChallenge}
                   onComplete={handleGameComplete}
                   onClose={() => setIsPlaying(false)}
+                  mode={gameMode} // Pass the mode
+                  opponent={selectedOpponent || undefined}
               />
           )
       )}
@@ -136,39 +150,96 @@ const Arcade: React.FC = () => {
                       </div>
 
                       <div className="mt-auto space-y-3 md:space-y-4">
-                          <div className="flex items-center gap-3 md:gap-4 bg-black/40 p-3 md:p-4 rounded-xl border border-gray-800">
-                              <div className="p-2 md:p-3 bg-green-900/20 rounded-full text-green-500">
-                                  <Ticket size={20} />
+                          {/* If level completed (or user is level 2 and finished initial challenge), show EXTRA MODES */}
+                          {hasBeatenLevel2 && selectedChallenge.type === 'trivia' && selectedChallenge.level === 2 ? (
+                              <div className="space-y-2">
+                                  <p className="text-center text-xs text-green-400 font-bold uppercase tracking-wider mb-2 flex items-center justify-center gap-1"><CheckCircle size={12}/> Juego Superado: Modos Extra Desbloqueados</p>
+                                  
+                                  <div className="grid grid-cols-2 gap-3">
+                                      <button 
+                                          onClick={() => handleStartGame('solo_survival')}
+                                          className="bg-purple-900/50 hover:bg-purple-800 text-purple-200 border border-purple-500/50 font-bold py-3 rounded-xl flex flex-col items-center justify-center gap-1 transition-all shadow-lg hover:shadow-purple-500/20"
+                                      >
+                                          <Zap size={20} />
+                                          <span className="text-xs uppercase">Solo Survival</span>
+                                      </button>
+                                      
+                                      <button 
+                                          onClick={() => {
+                                              if (!hasRadar) {
+                                                  alert("Necesitas comprar el 'Radar de Usuarios' en la tienda para desbloquear el modo Online.");
+                                                  return;
+                                              }
+                                              setShowDuelInvite(true);
+                                          }}
+                                          className={`bg-blue-900/50 hover:bg-blue-800 text-blue-200 border border-blue-500/50 font-bold py-3 rounded-xl flex flex-col items-center justify-center gap-1 transition-all shadow-lg hover:shadow-blue-500/20 ${!hasRadar ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+                                      >
+                                          <Swords size={20} />
+                                          <span className="text-xs uppercase">{hasRadar ? 'Duelo Online 1v1' : 'Bloqueado (Radar)'}</span>
+                                      </button>
+                                  </div>
+                                  
+                                  {/* Normal Replay */}
+                                  <button 
+                                      onClick={() => handleStartGame('normal')}
+                                      className="w-full bg-gray-800 hover:bg-gray-700 text-gray-400 text-xs py-2 rounded-lg font-bold uppercase mt-2 border border-gray-600"
+                                  >
+                                      Rejugar Modo Historia (Práctica)
+                                  </button>
                               </div>
-                              <div>
-                                  <p className="text-[10px] md:text-xs text-gray-500 uppercase font-bold">Recompensa (Solo 1ª Vez)</p>
-                                  <p className="text-lg md:text-xl font-bold text-white">{selectedChallenge.rewardCredits} Créditos</p>
-                              </div>
-                          </div>
+                          ) : (
+                              // Normal First Time Play or Replay for other levels
+                              <>
+                                <div className="flex items-center gap-3 md:gap-4 bg-black/40 p-3 md:p-4 rounded-xl border border-gray-800">
+                                    <div className="p-2 md:p-3 bg-green-900/20 rounded-full text-green-500">
+                                        <Ticket size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] md:text-xs text-gray-500 uppercase font-bold">Recompensa (Solo 1ª Vez)</p>
+                                        <p className="text-lg md:text-xl font-bold text-white">{selectedChallenge.rewardCredits} Créditos</p>
+                                    </div>
+                                </div>
 
-                          <button 
-                              onClick={handleStartGame}
-                              className="w-full bg-cine-gold hover:bg-white text-black font-black text-lg md:text-xl py-3 md:py-4 rounded-xl shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.02] transition-all flex items-center justify-center gap-2 md:gap-3 uppercase tracking-wide"
-                          >
-                              {user.isAdmin && (selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5) ? (
-                                  <><Shield size={20} fill="black" /> FORZAR INICIO (ADMIN)</>
-                              ) : (
-                                  <><Play size={20} fill="black" /> Comenzar Función</>
-                              )}
-                          </button>
-                          
-                          {currentLevel >= selectedChallenge.level && (
-                              <p className="text-center text-[10px] md:text-xs text-gray-500 font-bold">
-                                  * Ya has completado este nivel. Jugarás en modo repetición.
-                              </p>
-                          )}
-                          
-                          {selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5 && !user.isAdmin && (
-                              <p className="text-center text-[10px] md:text-xs text-red-500 font-bold flex items-center justify-center gap-1">
-                                  <AlertTriangle size={12}/> Requisito: Ver 5 películas (Llevas {user.watchedMovies.length})
-                              </p>
+                                <button 
+                                    onClick={() => handleStartGame('normal')}
+                                    className="w-full bg-cine-gold hover:bg-white text-black font-black text-lg md:text-xl py-3 md:py-4 rounded-xl shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.02] transition-all flex items-center justify-center gap-2 md:gap-3 uppercase tracking-wide"
+                                >
+                                    {user.isAdmin && (selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5) ? (
+                                        <><Shield size={20} fill="black" /> FORZAR INICIO (ADMIN)</>
+                                    ) : (
+                                        <><Play size={20} fill="black" /> Comenzar Función</>
+                                    )}
+                                </button>
+                                
+                                {selectedChallenge.type === 'timeline' && user.watchedMovies.length < 5 && !user.isAdmin && (
+                                    <p className="text-center text-[10px] md:text-xs text-red-500 font-bold flex items-center justify-center gap-1">
+                                        <AlertTriangle size={12}/> Requisito: Ver 5 películas (Llevas {user.watchedMovies.length})
+                                    </p>
+                                )}
+                              </>
                           )}
                       </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ONLINE INVITE MODAL */}
+      {showDuelInvite && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl animate-fade-in">
+              <div className="bg-cine-gray w-full max-w-md rounded-xl border border-blue-500 shadow-2xl p-6 relative">
+                  <button onClick={() => setShowDuelInvite(false)} className="absolute top-2 right-2 text-gray-400 hover:text-white"><X size={20}/></button>
+                  <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Swords className="text-blue-400"/> Desafiar Jugador</h3>
+                  <p className="text-sm text-gray-400 mb-4">Selecciona un usuario del radar para invitarle a un duelo de preguntas.</p>
+                  
+                  {/* Reuse Widget logic but strip it down visually if possible, or just reimplement a simple list */}
+                  <div className="bg-black/40 rounded-lg p-4 max-h-60 overflow-y-auto custom-scrollbar">
+                      {/* Re-implementing list for "Invite Mode" */}
+                      <InviteList onSelect={(u) => {
+                          setSelectedOpponent(u);
+                          setShowDuelInvite(false);
+                          handleStartGame('online_duel');
+                      }} />
                   </div>
               </div>
           </div>
@@ -276,5 +347,41 @@ const Arcade: React.FC = () => {
     </div>
   );
 };
+
+// Helper component for invite list
+const InviteList = ({ onSelect }: { onSelect: (u: any) => void }) => {
+    const { allUsers, user } = useData();
+    // Filter active users in last 10 mins (mock logic: check lastSeen or random)
+    const activeUsers = allUsers.filter(u => u.id !== user?.id && (u.lastSeen || 0) > Date.now() - 10 * 60 * 1000);
+    
+    // Fallback Mock Users for demo if no one online
+    const mockUsers = [
+        {id: 'bot1', name: 'Cinéfilo Bot', avatarUrl: 'https://ui-avatars.com/api/?name=Bot+1&background=random'},
+        {id: 'bot2', name: 'Tarantino Fan', avatarUrl: 'https://ui-avatars.com/api/?name=Tarantino&background=000&color=fff'}
+    ];
+
+    const list = activeUsers.length > 0 ? activeUsers : mockUsers;
+
+    return (
+        <div className="space-y-2">
+            {list.map(u => (
+                <button 
+                    key={u.id} 
+                    onClick={() => onSelect(u)}
+                    className="w-full flex items-center justify-between bg-black/40 hover:bg-blue-900/30 border border-transparent hover:border-blue-500 p-2 rounded-lg transition-all group"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <img src={u.avatarUrl} className="w-8 h-8 rounded-full" />
+                            <div className="absolute bottom-0 right-0 w-2 h-2 bg-green-500 rounded-full border border-black"></div>
+                        </div>
+                        <span className="text-white font-bold text-sm">{u.name}</span>
+                    </div>
+                    <span className="text-xs text-blue-400 font-bold uppercase opacity-0 group-hover:opacity-100">Invitar</span>
+                </button>
+            ))}
+        </div>
+    )
+}
 
 export default Arcade;

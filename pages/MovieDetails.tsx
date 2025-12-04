@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
@@ -165,34 +166,67 @@ const MovieDetails: React.FC = () => {
   const [showUnwatchConfirm, setShowUnwatchConfirm] = useState(false);
   const [pendingAction, setPendingAction] = useState<'unwatch' | 'watchlist' | null>(null);
 
+  // Helper to convert internal Movie type to TMDBMovieDetails type for display
+  const mapInternalMovieToDetails = (movie: any): TMDBMovieDetails => {
+      return {
+          id: movie.tmdbId || 0,
+          title: movie.title,
+          release_date: movie.year ? `${movie.year}-01-01` : 'N/A',
+          poster_path: movie.posterUrl,
+          backdrop_path: movie.backdropUrl || movie.posterUrl,
+          overview: movie.description,
+          genres: movie.genre?.map((g: string) => ({ id: 0, name: g })) || [],
+          credits: {
+              crew: movie.director ? [{ job: 'Director', name: movie.director, profile_path: null, id: 0 }] : [],
+              cast: movie.cast?.map((name: string) => ({ name: name, character: '', profile_path: null, id: 0 })) || []
+          },
+          videos: { results: [] },
+          vote_average: movie.rating || 0,
+          images: { backdrops: [], posters: [] }
+      };
+  }
+
   useEffect(() => {
     const fetchDetails = async () => {
+        if (!selectedMovieId) return;
         setLoading(true);
-        if (selectedMovieId?.startsWith('tmdb-')) {
-            // It's a TMDB ID
+        let fetchedDetails: TMDBMovieDetails | null = null;
+        let isLocal = false;
+
+        // 1. Try to fetch from TMDB if it looks like a TMDB ID
+        if (selectedMovieId.startsWith('tmdb-')) {
             const id = parseInt(selectedMovieId.replace('tmdb-', ''));
-            const data = await getMovieDetailsTMDB(id, tmdbToken);
-            setDetails(data);
-            
-            // Check if already in our DB by TMDB ID
+            // Check if already in our DB first to save API calls or for offline consistency
             const existing = movies.find(m => m.tmdbId === id);
-            if (existing) {
-                setIsInDb(true);
-            } else {
-                setIsInDb(false);
-            }
-        } else if (selectedMovieId) {
-            // Internal ID (navigated from Dashboard/Ranking)
-            const existing = movies.find(m => m.id === selectedMovieId);
-            if (existing && existing.tmdbId) {
-                const data = await getMovieDetailsTMDB(existing.tmdbId, tmdbToken);
-                setDetails(data);
-                setIsInDb(true);
+            
+            // Try to fetch fresh data from TMDB
+            const freshDetails = await getMovieDetailsTMDB(id, tmdbToken);
+            
+            if (freshDetails) {
+                fetchedDetails = freshDetails;
+                isLocal = !!existing;
             } else if (existing) {
-                // Should not happen with new structure but fallback
-                setIsInDb(true);
+                // FALLBACK TO INTERNAL DATA IF TMDB FAILS
+                fetchedDetails = mapInternalMovieToDetails(existing);
+                isLocal = true;
+            }
+        } else {
+            // It's an internal ID (legacy or just internal UUID)
+            const existing = movies.find(m => m.id === selectedMovieId);
+            if (existing) {
+                if (existing.tmdbId) {
+                    fetchedDetails = await getMovieDetailsTMDB(existing.tmdbId, tmdbToken);
+                }
+                // If TMDB fetch failed or no tmdbId, construct from internal data
+                if (!fetchedDetails) {
+                    fetchedDetails = mapInternalMovieToDetails(existing);
+                }
+                isLocal = true;
             }
         }
+
+        setDetails(fetchedDetails);
+        setIsInDb(isLocal);
         setLoading(false);
     };
 
@@ -206,7 +240,7 @@ const MovieDetails: React.FC = () => {
       
       // If NOT in DB, we must add it first
       if (!isInDb) {
-          movieId = `m-${details.id}`;
+          movieId = `tmdb-${details.id}`; // Standardized ID
           const newMovie = {
               id: movieId, // Create internal ID
               tmdbId: details.id,
@@ -295,7 +329,7 @@ const MovieDetails: React.FC = () => {
       
       let movieId = selectedMovieId || '';
       if (!isInDb) {
-          movieId = `m-${details.id}`;
+          movieId = `tmdb-${details.id}`; // Standardized ID
           const newMovie = {
               id: movieId,
               tmdbId: details.id,
@@ -337,24 +371,24 @@ const MovieDetails: React.FC = () => {
   };
 
   const handlePersonClick = (id: number) => {
-      setView(ViewState.PERSON_DETAILS, id);
+      if (id && id > 0) setView(ViewState.PERSON_DETAILS, id);
   }
 
   if (loading) return <div className="flex justify-center items-center h-[50vh]"><div className="animate-spin text-cine-gold">Cargando...</div></div>;
   if (!details) return <div className="text-center p-10">Película no encontrada</div>;
 
   // Extract Technical Crew (Objects instead of strings for profile_path)
-  const directors = details.credits.crew.filter(c => c.job === 'Director');
-  const writers = details.credits.crew.filter(c => ['Screenplay', 'Writer', 'Story', 'Screenstory'].includes(c.job)).slice(0, 2); // Limit to top 2
-  const music = details.credits.crew.filter(c => ['Original Music Composer', 'Music'].includes(c.job)).slice(0, 1);
-  const photography = details.credits.crew.filter(c => ['Director of Photography', 'Cinematography'].includes(c.job)).slice(0, 1);
+  const directors = details.credits?.crew?.filter(c => c.job === 'Director') || [];
+  const writers = details.credits?.crew?.filter(c => ['Screenplay', 'Writer', 'Story', 'Screenstory'].includes(c.job)).slice(0, 2) || []; 
+  const music = details.credits?.crew?.filter(c => ['Original Music Composer', 'Music'].includes(c.job)).slice(0, 1) || [];
+  const photography = details.credits?.crew?.filter(c => ['Director of Photography', 'Cinematography'].includes(c.job)).slice(0, 1) || [];
 
   // Filter unique crew members
   const uniqueWriters = Array.from(new Map(writers.map(item => [item.name, item])).values()) as typeof writers;
 
   // Trailer Logic
-  const trailer = details.videos?.results.find(v => v.site === "YouTube" && v.type === "Trailer" && v.iso_639_1 === "es") 
-               || details.videos?.results.find(v => v.site === "YouTube" && v.type === "Trailer"); 
+  const trailer = details.videos?.results?.find(v => v.site === "YouTube" && v.type === "Trailer" && v.iso_639_1 === "es") 
+               || details.videos?.results?.find(v => v.site === "YouTube" && v.type === "Trailer"); 
 
   const providers = details['watch/providers']?.results?.ES;
 
@@ -484,7 +518,9 @@ const MovieDetails: React.FC = () => {
                       {isInDb && movies.find(m => m.tmdbId === details.id)?.totalVotes! > 0 && (
                            <span className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded"><Star size={16} className="text-cine-gold" /> Club: {movies.find(m => m.tmdbId === details.id)?.rating.toFixed(1)}</span>
                       )}
-                      <span className="flex items-center gap-1"><Star size={16} className="text-gray-500" /> {details.vote_average.toFixed(1)} (TMDB)</span>
+                      {details.vote_average > 0 && (
+                          <span className="flex items-center gap-1"><Star size={16} className="text-gray-500" /> {details.vote_average.toFixed(1)} (TMDB)</span>
+                      )}
                       <span>{details.genres.slice(0, 3).map(g => g.name).join(', ')}</span>
                   </div>
                   
@@ -574,40 +610,42 @@ const MovieDetails: React.FC = () => {
 
               <section>
                   <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3">Sinopsis</h3>
-                  <p className="text-gray-300 leading-relaxed text-lg">{details.overview}</p>
+                  <p className="text-gray-300 leading-relaxed text-lg">{details.overview || "No hay sinopsis disponible."}</p>
               </section>
 
               {/* CAST SECTION (VISUAL) */}
-              <section>
-                  <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3 flex items-center gap-2">
-                      <Users size={24}/> Reparto Principal
-                  </h3>
-                  <div className="flex overflow-x-auto pb-6 gap-4 custom-scrollbar">
-                      {details.credits.cast.slice(0, 12).map(actor => (
-                          <div 
-                            key={actor.id} 
-                            onClick={() => handlePersonClick(actor.id)}
-                            className="flex-shrink-0 w-32 group cursor-pointer"
-                          >
-                              <div className="w-32 h-44 rounded-lg overflow-hidden border border-gray-800 bg-gray-900 shadow-md relative group-hover:border-cine-gold transition-colors">
-                                  {actor.profile_path ? (
-                                      <img 
-                                        src={getImageUrl(actor.profile_path, 'w200')} 
-                                        alt={actor.name} 
-                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                                      />
-                                  ) : (
-                                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 bg-gray-800">
-                                          <Users size={32}/>
-                                      </div>
-                                  )}
+              {details.credits?.cast?.length > 0 && (
+                  <section>
+                      <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3 flex items-center gap-2">
+                          <Users size={24}/> Reparto Principal
+                      </h3>
+                      <div className="flex overflow-x-auto pb-6 gap-4 custom-scrollbar">
+                          {details.credits.cast.slice(0, 12).map(actor => (
+                              <div 
+                                key={actor.id} 
+                                onClick={() => handlePersonClick(actor.id)}
+                                className="flex-shrink-0 w-32 group cursor-pointer"
+                              >
+                                  <div className="w-32 h-44 rounded-lg overflow-hidden border border-gray-800 bg-gray-900 shadow-md relative group-hover:border-cine-gold transition-colors">
+                                      {actor.profile_path ? (
+                                          <img 
+                                            src={getImageUrl(actor.profile_path, 'w200')} 
+                                            alt={actor.name} 
+                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                                          />
+                                      ) : (
+                                          <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 bg-gray-800">
+                                              <Users size={32}/>
+                                          </div>
+                                      )}
+                                  </div>
+                                  <p className="text-white font-bold text-sm mt-2 leading-tight group-hover:text-cine-gold transition-colors">{actor.name}</p>
+                                  <p className="text-gray-500 text-xs italic">{actor.character}</p>
                               </div>
-                              <p className="text-white font-bold text-sm mt-2 leading-tight group-hover:text-cine-gold transition-colors">{actor.name}</p>
-                              <p className="text-gray-500 text-xs italic">{actor.character}</p>
-                          </div>
-                      ))}
-                  </div>
-              </section>
+                          ))}
+                      </div>
+                  </section>
+              )}
 
               {/* Watch Providers */}
               {providers && (

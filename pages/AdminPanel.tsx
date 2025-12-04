@@ -1,11 +1,11 @@
-
-
-
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
-import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw, FileText, CheckCircle } from 'lucide-react';
+import { Shield, Check, X, Key, Bug, Trash2, Megaphone, Wand2, Globe, Loader2, Image as ImageIcon, Wrench, AlertTriangle, Clock, RefreshCw, FileText, CheckCircle, Search, Mail, ShieldAlert, UserX, UserCheck, Ban, Calendar, Trophy, Ticket, Star, Medal } from 'lucide-react';
 import { enhanceNewsContent, enhanceUpdateContent, generateCinemaNews } from '../services/geminiService';
 import { searchMoviesTMDB, searchPersonTMDB, getImageUrl } from '../services/tmdbService';
+import RankBadge from '../components/RankBadge';
+import { MISSIONS, XP_TABLE } from '../constants';
+import { User } from '../types';
 
 // Sub-component for individual news row with internal confirmation state
 const NewsItemRow: React.FC<{ item: any, onDelete: (id: string) => Promise<void> }> = ({ item, onDelete }) => {
@@ -61,7 +61,7 @@ const NewsItemRow: React.FC<{ item: any, onDelete: (id: string) => Promise<void>
 };
 
 const AdminPanel: React.FC = () => {
-  const { allUsers, approveUser, rejectUser, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, deleteNews, news, resetGamification, resetAutomation, automationStatus, auditQuality } = useData();
+  const { allUsers, approveUser, rejectUser, deleteUserAccount, toggleUserAdmin, sendSystemMessage, tmdbToken, setTmdbToken, feedbackList, resolveFeedback, deleteFeedback, publishNews, deleteNews, news, resetGamification, resetAutomation, automationStatus, auditQuality } = useData();
   const [activeTab, setActiveTab] = useState<'users' | 'feedback' | 'news' | 'config'>('users');
   
   // Token State
@@ -87,8 +87,28 @@ const AdminPanel: React.FC = () => {
   // World News State
   const [generatedNews, setGeneratedNews] = useState<{ title: string, content: string, visualPrompt: string, searchQuery: string }[]>([]);
 
+  // User Management State
+  const [userSearch, setUserSearch] = useState('');
+  const [msgModal, setMsgModal] = useState<{ userId: string, name: string } | null>(null);
+  const [msgTitle, setMsgTitle] = useState('');
+  const [msgBody, setMsgBody] = useState('');
+  
+  // Stats Modal State
+  const [statsUser, setStatsUser] = useState<User | null>(null);
+  
+  // Ban Modal State
+  const [banModal, setBanModal] = useState<{ userId: string, name: string } | null>(null);
+  const [banDuration, setBanDuration] = useState<string>('permanent'); // '1h', '24h', '3d', '7d', '30d', 'permanent'
+
   const pendingUsers = allUsers.filter(u => u.status === 'pending');
   const pendingFeedback = feedbackList.filter(f => f.status === 'pending');
+
+  const filteredUsers = useMemo(() => {
+      return allUsers.filter(u => 
+          u.status !== 'pending' && 
+          (u.name.toLowerCase().includes(userSearch.toLowerCase()) || u.email.toLowerCase().includes(userSearch.toLowerCase()))
+      );
+  }, [allUsers, userSearch]);
 
   // Helper
   const formatTime = (timestamp: number) => {
@@ -254,12 +274,206 @@ const AdminPanel: React.FC = () => {
       }
   }
 
+  const handleSendMessage = async () => {
+      if (!msgModal || !msgTitle || !msgBody) return;
+      await sendSystemMessage(msgModal.userId, msgTitle, msgBody, 'info');
+      setMsgModal(null);
+      setMsgTitle('');
+      setMsgBody('');
+      alert("Mensaje enviado correctamente.");
+  }
+
+  const handleDeleteUser = async (userId: string) => {
+      const confirm = window.confirm("¿ESTÁS SEGURO? Esta acción borrará permanentemente la cuenta del usuario y sus datos. No se puede deshacer.");
+      if (confirm) {
+          await deleteUserAccount(userId);
+      }
+  }
+
+  const handleConfirmBan = async () => {
+      if (!banModal) return;
+      
+      let ms = 0;
+      switch(banDuration) {
+          case '1h': ms = 60 * 60 * 1000; break;
+          case '24h': ms = 24 * 60 * 60 * 1000; break;
+          case '3d': ms = 3 * 24 * 60 * 60 * 1000; break;
+          case '7d': ms = 7 * 24 * 60 * 60 * 1000; break;
+          case '30d': ms = 30 * 24 * 60 * 60 * 1000; break;
+          case 'permanent': ms = 0; break;
+      }
+
+      await rejectUser(banModal.userId, ms);
+      setBanModal(null);
+  }
+
+  // --- XP Calculation Helper for Modal ---
+  const getStatsProgress = (u: User) => {
+      const currentLevel = u.level || 1;
+      const xp = u.xp || 0;
+      let prevThreshold = 0;
+      let nextThreshold = XP_TABLE[0];
+      if (currentLevel > 1) {
+          prevThreshold = XP_TABLE[currentLevel - 2];
+          nextThreshold = XP_TABLE[currentLevel - 1] || (prevThreshold * 1.5);
+      }
+      const percent = Math.min(100, (Math.max(0, xp - prevThreshold) / (nextThreshold - prevThreshold)) * 100);
+      return { percent, nextThreshold };
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 pb-20">
       <div className="flex items-center gap-3 mb-8">
         <Shield className="text-cine-red" size={32} />
         <h2 className="text-3xl font-bold text-white">Panel de Administración</h2>
       </div>
+
+      {/* Message Modal */}
+      {msgModal && (
+          <div className="fixed inset-0 z-[999] bg-black/90 flex items-center justify-center p-4">
+              <div className="bg-cine-gray p-6 rounded-xl border border-cine-gold w-full max-w-md">
+                  <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Mail size={20}/> Mensaje para {msgModal.name}</h3>
+                  <input type="text" placeholder="Asunto" className="w-full bg-black/50 border border-gray-600 rounded p-2 text-white mb-2" value={msgTitle} onChange={e => setMsgTitle(e.target.value)} />
+                  <textarea placeholder="Escribe tu mensaje..." className="w-full h-32 bg-black/50 border border-gray-600 rounded p-2 text-white mb-4" value={msgBody} onChange={e => setMsgBody(e.target.value)} />
+                  <div className="flex gap-2 justify-end">
+                      <button onClick={() => setMsgModal(null)} className="px-4 py-2 text-gray-400">Cancelar</button>
+                      <button onClick={handleSendMessage} className="bg-cine-gold text-black font-bold px-4 py-2 rounded">Enviar</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Ban Confirmation Modal */}
+      {banModal && (
+          <div className="fixed inset-0 z-[999] bg-black/90 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-cine-gray p-6 rounded-xl border border-red-500 w-full max-w-sm shadow-[0_0_50px_rgba(220,38,38,0.2)]">
+                  <div className="flex items-center gap-3 text-red-500 mb-4">
+                      <Ban size={32} />
+                      <h3 className="text-xl font-bold">Banear a {banModal.name}</h3>
+                  </div>
+                  
+                  <p className="text-gray-400 mb-4 text-sm">
+                      Selecciona la duración del castigo. El usuario no podrá entrar en la app hasta que pase este tiempo.
+                  </p>
+
+                  <div className="space-y-2 mb-6">
+                      <select 
+                        value={banDuration} 
+                        onChange={(e) => setBanDuration(e.target.value)}
+                        className="w-full bg-black/50 border border-gray-600 rounded p-3 text-white focus:border-red-500 outline-none"
+                      >
+                          <option value="1h">1 Hora (Advertencia)</option>
+                          <option value="24h">24 Horas (Leve)</option>
+                          <option value="3d">3 Días (Moderado)</option>
+                          <option value="7d">1 Semana (Grave)</option>
+                          <option value="30d">1 Mes (Muy Grave)</option>
+                          <option value="permanent">PERMANENTE (Expulsión)</option>
+                      </select>
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                      <button onClick={() => setBanModal(null)} className="px-4 py-2 text-gray-400 hover:text-white">Cancelar</button>
+                      <button onClick={handleConfirmBan} className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded shadow-lg transition-colors">
+                          Aplicar Sanción
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Career Stats Modal */}
+      {statsUser && (
+          <div className="fixed inset-0 z-[999] bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-cine-gray w-full max-w-2xl rounded-2xl border border-cine-gold shadow-[0_0_50px_rgba(212,175,55,0.2)] overflow-hidden flex flex-col max-h-[90vh]">
+                  <div className="relative p-6 border-b border-gray-700 bg-black/40">
+                      <button onClick={() => setStatsUser(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24}/></button>
+                      <div className="flex items-center gap-6">
+                          <img src={statsUser.avatarUrl} alt={statsUser.name} className="w-20 h-20 rounded-full border-2 border-cine-gold shadow-lg" />
+                          <div>
+                              <h3 className="text-2xl font-bold text-white mb-2">{statsUser.name}</h3>
+                              <RankBadge level={statsUser.level || 1} size="md"/>
+                          </div>
+                      </div>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto custom-scrollbar space-y-6">
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-black/30 p-3 rounded-lg border border-gray-700 text-center">
+                              <p className="text-xs text-gray-500 uppercase font-bold">Nivel</p>
+                              <p className="text-2xl font-black text-white">{statsUser.level || 1}</p>
+                          </div>
+                          <div className="bg-black/30 p-3 rounded-lg border border-gray-700 text-center">
+                              <p className="text-xs text-gray-500 uppercase font-bold">Experiencia</p>
+                              <p className="text-2xl font-black text-cine-gold">{statsUser.xp || 0}</p>
+                          </div>
+                          <div className="bg-black/30 p-3 rounded-lg border border-gray-700 text-center">
+                              <p className="text-xs text-gray-500 uppercase font-bold">Créditos</p>
+                              <p className="text-2xl font-black text-green-500">{statsUser.credits || 0}</p>
+                          </div>
+                          <div className="bg-black/30 p-3 rounded-lg border border-gray-700 text-center">
+                              <p className="text-xs text-gray-500 uppercase font-bold">Misiones</p>
+                              <p className="text-2xl font-black text-blue-400">{statsUser.completedMissions?.length || 0}</p>
+                          </div>
+                      </div>
+
+                      {/* XP Progress Bar */}
+                      <div>
+                          <div className="flex justify-between text-xs text-gray-400 mb-1">
+                              <span>Progreso Nivel {statsUser.level || 1}</span>
+                              <span>Siguiente Nivel</span>
+                          </div>
+                          <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
+                              <div 
+                                  className="h-full bg-gradient-to-r from-cine-gold to-yellow-600"
+                                  style={{ width: `${getStatsProgress(statsUser).percent}%` }}
+                              ></div>
+                          </div>
+                      </div>
+
+                      {/* Missions List */}
+                      <div>
+                          <h4 className="font-bold text-white mb-3 flex items-center gap-2 border-b border-gray-700 pb-2">
+                              <Medal size={18} className="text-cine-gold"/> Historial de Misiones
+                          </h4>
+                          
+                          <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                              {[...MISSIONS].sort((a, b) => {
+                                  const aCompleted = statsUser.completedMissions?.includes(a.id) ? 1 : 0;
+                                  const bCompleted = statsUser.completedMissions?.includes(b.id) ? 1 : 0;
+                                  return bCompleted - aCompleted; // Completed first
+                              }).map(mission => {
+                                  const isCompleted = statsUser.completedMissions?.includes(mission.id);
+                                  const Icon = mission.icon;
+                                  return (
+                                      <div key={mission.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${isCompleted ? 'bg-black/40 border-green-900/30' : 'bg-black/20 border-gray-800 opacity-60'}`}>
+                                          <div className={`p-2 rounded-full ${isCompleted ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'}`}>
+                                              {isCompleted ? <Check size={16} /> : <Icon size={16} />}
+                                          </div>
+                                          <div className="flex-grow">
+                                              <p className={`text-sm font-bold ${isCompleted ? 'text-white' : 'text-gray-400'}`}>{mission.title}</p>
+                                              <p className="text-xs text-gray-500">{mission.description}</p>
+                                          </div>
+                                          {isCompleted && (
+                                              <span className="text-[10px] bg-green-900/20 text-green-400 px-2 py-1 rounded font-bold border border-green-900/30">
+                                                  +{mission.xpReward} XP
+                                              </span>
+                                          )}
+                                      </div>
+                                  )
+                              })}
+                          </div>
+                      </div>
+                  </div>
+                  
+                  <div className="p-4 border-t border-gray-700 bg-black/40 text-right">
+                      <button onClick={() => setStatsUser(null)} className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded transition-colors">
+                          Cerrar Expediente
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-4 mb-8">
@@ -271,28 +485,148 @@ const AdminPanel: React.FC = () => {
 
       {/* USERS TAB */}
       {activeTab === 'users' && (
-          <div className="bg-cine-gray rounded-xl border border-gray-800 overflow-hidden">
-            <div className="p-6 border-b border-gray-800">
-                <h3 className="text-xl font-bold text-white">Solicitudes Pendientes ({pendingUsers.length})</h3>
-            </div>
-            {pendingUsers.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">No hay solicitudes pendientes.</div>
-            ) : (
-                <div>
-                    {pendingUsers.map(user => (
-                        <div key={user.id} className="p-4 border-b border-gray-800 flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-4">
-                                <img src={user.avatarUrl} className="w-12 h-12 rounded-full" />
-                                <div><p className="font-bold text-white">{user.name}</p><p className="text-gray-400 text-sm">{user.email}</p></div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => approveUser(user.id)} className="px-3 py-1 bg-green-600 rounded text-white"><Check/></button>
-                                <button onClick={() => rejectUser(user.id)} className="px-3 py-1 bg-red-600 rounded text-white"><X/></button>
-                            </div>
-                        </div>
-                    ))}
+          <div className="space-y-8">
+              {/* PENDING REQUESTS */}
+              <div className="bg-cine-gray rounded-xl border border-gray-800 overflow-hidden">
+                <div className="p-6 border-b border-gray-800 bg-yellow-900/10">
+                    <h3 className="text-xl font-bold text-yellow-500 flex items-center gap-2"><UserCheck size={24}/> Solicitudes Pendientes ({pendingUsers.length})</h3>
                 </div>
-            )}
+                {pendingUsers.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">No hay solicitudes pendientes.</div>
+                ) : (
+                    <div>
+                        {pendingUsers.map(user => (
+                            <div key={user.id} className="p-4 border-b border-gray-800 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                    <img src={user.avatarUrl} className="w-12 h-12 rounded-full" />
+                                    <div><p className="font-bold text-white">{user.name}</p><p className="text-gray-400 text-sm">{user.email}</p></div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => approveUser(user.id)} className="px-3 py-1 bg-green-600 rounded text-white flex items-center gap-1"><Check size={16}/> Aprobar</button>
+                                    <button onClick={() => rejectUser(user.id)} className="px-3 py-1 bg-red-600 rounded text-white flex items-center gap-1"><X size={16}/> Rechazar</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+              </div>
+
+              {/* USER MANAGEMENT */}
+              <div className="bg-cine-gray rounded-xl border border-gray-800 overflow-hidden">
+                  <div className="p-6 border-b border-gray-800 flex flex-col md:flex-row justify-between items-center gap-4">
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2"><Shield size={24} className="text-blue-400"/> Gestión de Socios</h3>
+                      <div className="relative w-full md:w-64">
+                          <input 
+                            type="text" 
+                            placeholder="Buscar usuario..." 
+                            className="w-full bg-black/50 border border-gray-700 rounded-full py-2 pl-10 pr-4 text-white focus:border-cine-gold outline-none"
+                            value={userSearch}
+                            onChange={(e) => setUserSearch(e.target.value)}
+                          />
+                          <Search className="absolute left-3 top-2.5 text-gray-500" size={16}/>
+                      </div>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm text-gray-400">
+                          <thead className="bg-black/40 text-xs uppercase font-bold text-gray-500">
+                              <tr>
+                                  <th className="px-6 py-3">Usuario</th>
+                                  <th className="px-6 py-3">Rol / Nivel</th>
+                                  <th className="px-6 py-3">Estado</th>
+                                  <th className="px-6 py-3 text-right">Acciones</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800">
+                              {filteredUsers.map(u => {
+                                  const isTemporaryBan = u.status === 'rejected' && !!u.banExpiresAt;
+                                  return (
+                                  <tr key={u.id} className="hover:bg-white/5 transition-colors">
+                                      <td className="px-6 py-4 flex items-center gap-3">
+                                          <img src={u.avatarUrl} className="w-10 h-10 rounded-full border border-gray-700" />
+                                          <div>
+                                              <p className="font-bold text-white">{u.name}</p>
+                                              <p className="text-xs">{u.email}</p>
+                                          </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          <div className="flex flex-col gap-1">
+                                              <span className={`text-xs font-bold px-2 py-0.5 rounded w-fit ${u.isAdmin ? 'bg-purple-900 text-purple-200' : 'bg-gray-800 text-gray-300'}`}>
+                                                  {u.isAdmin ? 'ADMIN' : 'SOCIO'}
+                                              </span>
+                                              <RankBadge level={u.level || 1} size="sm" showTitle={false}/>
+                                          </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          {u.status === 'active' ? (
+                                              <span className="text-green-500 flex items-center gap-1 font-bold text-xs"><CheckCircle size={12}/> Activo</span>
+                                          ) : u.status === 'rejected' ? (
+                                              <div className="flex flex-col">
+                                                  <span className="text-red-500 flex items-center gap-1 font-bold text-xs"><Ban size={12}/> Baneado</span>
+                                                  {isTemporaryBan ? (
+                                                      <span className="text-[10px] text-gray-500 flex items-center gap-1"><Clock size={10}/> Hasta {new Date(u.banExpiresAt!).toLocaleDateString()}</span>
+                                                  ) : (
+                                                      <span className="text-[10px] text-gray-500">Permanente</span>
+                                                  )}
+                                              </div>
+                                          ) : (
+                                              <span className="text-yellow-500 text-xs">Pendiente</span>
+                                          )}
+                                      </td>
+                                      <td className="px-6 py-4 text-right">
+                                          <div className="flex items-center justify-end gap-2">
+                                              <button 
+                                                onClick={() => setStatsUser(u)}
+                                                className="p-2 bg-yellow-900/20 text-yellow-500 hover:bg-yellow-900/50 rounded transition-colors" title="Ver Carrera y Misiones"
+                                              >
+                                                  <Trophy size={16}/>
+                                              </button>
+
+                                              <button 
+                                                onClick={() => setMsgModal({ userId: u.id, name: u.name })}
+                                                className="p-2 bg-blue-900/20 text-blue-400 hover:bg-blue-900/50 rounded transition-colors" title="Enviar Mensaje"
+                                              >
+                                                  <Mail size={16}/>
+                                              </button>
+                                              
+                                              <button 
+                                                onClick={() => toggleUserAdmin(u.id)}
+                                                className={`p-2 rounded transition-colors ${u.isAdmin ? 'bg-purple-900 text-white' : 'bg-gray-800 text-gray-500 hover:text-purple-400'}`} title="Alternar Admin"
+                                              >
+                                                  <ShieldAlert size={16}/>
+                                              </button>
+
+                                              {u.status === 'rejected' ? (
+                                                  <button 
+                                                    onClick={() => approveUser(u.id)}
+                                                    className="p-2 bg-green-900/20 text-green-400 hover:bg-green-900/50 rounded transition-colors" title="Desbanear (Activar)"
+                                                  >
+                                                      <CheckCircle size={16}/>
+                                                  </button>
+                                              ) : (
+                                                  <button 
+                                                    onClick={() => setBanModal({ userId: u.id, name: u.name })}
+                                                    className="p-2 bg-orange-900/20 text-orange-400 hover:bg-orange-900/50 rounded transition-colors" title="Banear Usuario"
+                                                  >
+                                                      <Ban size={16}/>
+                                                  </button>
+                                              )}
+
+                                              <button 
+                                                onClick={() => handleDeleteUser(u.id)}
+                                                className="p-2 bg-red-900/20 text-red-400 hover:bg-red-900/50 rounded transition-colors" title="Borrar Cuenta"
+                                              >
+                                                  <Trash2 size={16}/>
+                                              </button>
+                                          </div>
+                                      </td>
+                                  </tr>
+                              )})}
+                          </tbody>
+                      </table>
+                      {filteredUsers.length === 0 && <div className="p-8 text-center text-gray-500 italic">No se encontraron usuarios.</div>}
+                  </div>
+              </div>
           </div>
       )}
 

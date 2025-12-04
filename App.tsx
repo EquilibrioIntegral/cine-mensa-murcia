@@ -1,8 +1,5 @@
 
 
-
-
-
 import React from 'react';
 import { DataProvider, useData } from './context/DataContext';
 import Navbar from './components/Navbar';
@@ -24,7 +21,7 @@ import Mailbox from './pages/Mailbox';
 import CareerMilestoneModal from './components/CareerMilestoneModal';
 import PrivateChatModal from './components/PrivateChatModal';
 import { ViewState } from './types';
-import { Clock, ShieldAlert } from 'lucide-react';
+import { Clock, ShieldAlert, Ban, Timer } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab, logout } = useData();
@@ -55,6 +52,58 @@ const AppContent: React.FC = () => {
                       className="w-full bg-cine-gold hover:bg-white text-black font-bold py-3 rounded-xl transition-all shadow-lg hover:scale-105 active:scale-95"
                   >
                       Aceptar
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
+  // --- BLOCK REJECTED/BANNED USERS (RED SCREEN) ---
+  if (user.status === 'rejected') {
+      const isTemporary = !!user.banExpiresAt;
+      const timeLeft = user.banExpiresAt ? Math.max(0, user.banExpiresAt - Date.now()) : 0;
+      const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+      return (
+          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/95 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-red-900/10 p-8 rounded-2xl border border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.4)] max-w-sm w-full text-center relative overflow-hidden">
+                  {/* Decorative Background */}
+                  <div className="absolute top-0 left-0 w-full h-2 bg-red-600"></div>
+                  
+                  <div className="w-16 h-16 bg-red-900/40 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/50">
+                      <Ban size={32} className="text-red-500" />
+                  </div>
+                  
+                  <h3 className="text-xl font-bold text-white mb-2">Cuenta Suspendida</h3>
+                  <p className="text-red-200 mb-6 text-sm leading-relaxed">
+                      Tu acceso al club ha sido revocado por el administrador debido al incumplimiento de las normas.
+                  </p>
+                  
+                  {isTemporary ? (
+                      <div className="bg-black/40 p-4 rounded-lg border border-red-500/30 mb-6">
+                          <p className="text-xs text-red-400 font-bold uppercase mb-1 flex items-center justify-center gap-1">
+                              <Timer size={12} /> Tiempo restante
+                          </p>
+                          <p className="text-xl font-mono text-white font-bold">
+                              {days}d {hours}h {minutes}m
+                          </p>
+                          <p className="text-[10px] text-gray-500 mt-2">
+                              Podrás entrar automáticamente cuando el contador llegue a cero.
+                          </p>
+                      </div>
+                  ) : (
+                      <p className="text-red-500 font-bold text-xs uppercase tracking-widest mb-8 border border-red-500/50 p-2 rounded">
+                          Suspensión Permanente
+                      </p>
+                  )}
+                  
+                  <button 
+                      onClick={logout}
+                      className="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition-all shadow-lg"
+                  >
+                      Cerrar Sesión
                   </button>
               </div>
           </div>

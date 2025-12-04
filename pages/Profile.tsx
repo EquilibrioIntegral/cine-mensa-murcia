@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import AvatarSelector from '../components/AvatarSelector';
-import { User, Film, Star, MessageSquare, ThumbsUp, Medal, Trophy, CheckCircle, Lock, ChevronDown, ChevronUp } from 'lucide-react';
+import { User, Film, Star, MessageSquare, ThumbsUp, Medal, Trophy, CheckCircle, Lock, ChevronDown, ChevronUp, ChevronsRight } from 'lucide-react';
 import RankBadge from '../components/RankBadge';
 import { MISSIONS, RANKS, XP_TABLE } from '../constants';
+import { Mission } from '../types';
 
 const Profile: React.FC = () => {
   const { user, userRatings, updateUserProfile, initialProfileTab, setInitialProfileTab } = useData();
@@ -232,6 +234,18 @@ const Profile: React.FC = () => {
                         const completedCount = rankMissions.filter(m => user.completedMissions?.includes(m.id)).length;
                         const totalCount = rankMissions.length;
                         
+                        // GROUP MISSIONS BY LEVEL
+                        const missionsByLevel: Record<number, Mission[]> = {};
+                        rankMissions.forEach(m => {
+                            // If minLevel is not defined, it assumes level 1
+                            const lvl = m.minLevel || 1;
+                            if (!missionsByLevel[lvl]) missionsByLevel[lvl] = [];
+                            missionsByLevel[lvl].push(m);
+                        });
+                        
+                        // Sort levels to render in order
+                        const sortedLevels = Object.keys(missionsByLevel).map(Number).sort((a,b) => a-b);
+
                         // Determine Rank Status
                         let statusColor = "text-gray-500";
                         let borderColor = "border-gray-800";
@@ -279,55 +293,70 @@ const Profile: React.FC = () => {
                                         {rankMissions.length === 0 ? (
                                             <p className="text-gray-500 italic text-sm text-center">No hay misiones específicas para este rango aún.</p>
                                         ) : (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                {rankMissions.map(mission => {
-                                                    const isCompleted = user.completedMissions?.includes(mission.id);
-                                                    // New Logic: Locked if user level is lower than mission requirement, even if rank is unlocked
-                                                    const isLevelLocked = mission.minLevel && currentLevel < mission.minLevel;
-                                                    const Icon = mission.icon;
-                                                    
-                                                    // Locked Visuals
-                                                    if (isLevelLocked) {
-                                                        return (
-                                                            <div key={mission.id} className="p-3 rounded-lg border border-gray-800 bg-black/20 flex items-center gap-3 opacity-60 grayscale relative overflow-hidden group">
-                                                                <div className="p-2 rounded-full bg-black/50 text-gray-600">
-                                                                    <Lock size={18} />
-                                                                </div>
-                                                                <div className="flex-grow">
-                                                                    <h5 className="text-sm font-bold text-gray-500">{mission.title}</h5>
-                                                                    <p className="text-xs text-gray-600">Desbloquea en Nivel {mission.minLevel}</p>
-                                                                </div>
-                                                                {/* Tooltip on Hover */}
-                                                                <div className="absolute inset-0 bg-black/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                    <span className="text-xs font-bold text-cine-gold">Necesitas Nivel {mission.minLevel}</span>
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    }
-
+                                            <div className="space-y-6">
+                                                {/* SECTION GROUPING */}
+                                                {sortedLevels.map(level => {
+                                                    const groupMissions = missionsByLevel[level];
                                                     return (
-                                                        <div 
-                                                            key={mission.id} 
-                                                            className={`p-3 rounded-lg border flex items-center gap-3 transition-all ${
-                                                                isCompleted 
-                                                                    ? 'bg-green-900/10 border-green-900/50' 
-                                                                    : 'bg-black/40 border-gray-800'
-                                                            }`}
-                                                        >
-                                                            <div className={`p-2 rounded-full ${isCompleted ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'}`}>
-                                                                {isCompleted ? <CheckCircle size={18} /> : <Icon size={18} />}
-                                                            </div>
-                                                            <div className="flex-grow">
-                                                                <h5 className={`text-sm font-bold ${isCompleted ? 'text-white' : 'text-gray-300'}`}>{mission.title}</h5>
-                                                                <p className="text-xs text-gray-500">{mission.description}</p>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${isCompleted ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-500'}`}>
-                                                                    +{mission.xpReward} XP
+                                                        <div key={level}>
+                                                            {/* SECTION HEADER */}
+                                                            <div className="flex items-center gap-2 mb-3 pb-1 border-b border-gray-700/50">
+                                                                <span className="text-cine-gold font-black text-xs uppercase tracking-widest bg-black/40 px-2 py-1 rounded border border-cine-gold/30">
+                                                                    Fase {level}
                                                                 </span>
+                                                                <ChevronsRight size={14} className="text-gray-600"/>
+                                                                <span className="text-xs text-gray-300 font-bold uppercase">Objetivo: Alcanzar Nivel {level + 1}</span>
+                                                            </div>
+
+                                                            {/* GRID OF MISSIONS FOR THIS LEVEL */}
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                {groupMissions.map(mission => {
+                                                                    const isCompleted = user.completedMissions?.includes(mission.id);
+                                                                    const isLevelLocked = currentLevel < level;
+                                                                    const Icon = mission.icon;
+                                                                    
+                                                                    // Locked Visuals
+                                                                    if (isLevelLocked) {
+                                                                        return (
+                                                                            <div key={mission.id} className="p-3 rounded-lg border border-gray-800 bg-black/20 flex items-center gap-3 opacity-60 grayscale relative overflow-hidden group">
+                                                                                <div className="p-2 rounded-full bg-black/50 text-gray-600">
+                                                                                    <Lock size={18} />
+                                                                                </div>
+                                                                                <div className="flex-grow">
+                                                                                    <h5 className="text-sm font-bold text-gray-500">{mission.title}</h5>
+                                                                                    <p className="text-xs text-gray-600">Desbloquea en Nivel {mission.minLevel}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )
+                                                                    }
+
+                                                                    return (
+                                                                        <div 
+                                                                            key={mission.id} 
+                                                                            className={`p-3 rounded-lg border flex items-center gap-3 transition-all ${
+                                                                                isCompleted 
+                                                                                    ? 'bg-green-900/10 border-green-900/50' 
+                                                                                    : 'bg-black/40 border-gray-800'
+                                                                            }`}
+                                                                        >
+                                                                            <div className={`p-2 rounded-full ${isCompleted ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'}`}>
+                                                                                {isCompleted ? <CheckCircle size={18} /> : <Icon size={18} />}
+                                                                            </div>
+                                                                            <div className="flex-grow">
+                                                                                <h5 className={`text-sm font-bold ${isCompleted ? 'text-white' : 'text-gray-300'}`}>{mission.title}</h5>
+                                                                                <p className="text-xs text-gray-500">{mission.description}</p>
+                                                                            </div>
+                                                                            <div className="text-right">
+                                                                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${isCompleted ? 'bg-cine-gold text-black' : 'bg-gray-800 text-gray-500'}`}>
+                                                                                    +{mission.xpReward} XP
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         </div>
-                                                    );
+                                                    )
                                                 })}
                                             </div>
                                         )}

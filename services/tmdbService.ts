@@ -244,6 +244,8 @@ export const getMovieDetailsTMDB = async (id: number, token: string): Promise<TM
 
 export const getImageUrl = (path: string | null, size: 'w200' | 'w500' | 'original' = 'w500') => {
   if (!path) return 'https://via.placeholder.com/500x750?text=No+Image';
+  // Check if path is already a full URL (e.g. from Pollinations AI or stored data)
+  if (path.startsWith('http')) return path;
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
