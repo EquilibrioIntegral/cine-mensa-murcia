@@ -24,38 +24,13 @@ export const STARTER_AVATARS = [
 
 // --- GAMIFICATION CONSTANTS ---
 
-export const XP_TABLE = [
-    100,    // Lvl 1 -> 2
-    232,    // Lvl 2 -> 3
-    401,    // Lvl 3 -> 4
-    613,    // Lvl 4 -> 5 (Rank Up to Proyeccionista)
-    875,    // Lvl 5 -> 6
-    1195,   // Lvl 6 -> 7
-    1582,   // Lvl 7 -> 8
-    2046,   // Lvl 8 -> 9
-    2599,   // Lvl 9 -> 10
-    3254,   // Lvl 10 -> 11
-    4025,   // Lvl 11 -> 12
-    4929,   // Lvl 12 -> 13
-    5984,   // Lvl 13 -> 14
-    7211,   // Lvl 14 -> 15
-    8633,   // Lvl 15 -> 16
-    10275,  // Lvl 16 -> 17
-    12166,  // Lvl 17 -> 18
-    14336,  // Lvl 18 -> 19
-    16820,  // Lvl 19 -> 20
-    19656,  // Lvl 20 -> 21
-    22886,  // Lvl 21 -> 22
-    26557,  // Lvl 22 -> 23
-    30720,  // Lvl 23 -> 24
-    35431   // Lvl 24 -> 25
-];
-
-// Generar el resto hasta nivel 100
-for (let i = 25; i <= 100; i++) {
-    const prevTotal = XP_TABLE[XP_TABLE.length - 1];
-    const nextLevelCost = Math.floor(100 * Math.pow(i, 1.35)); 
-    XP_TABLE.push(prevTotal + nextLevelCost);
+// Sistema Lineal: 100 XP por nivel.
+// Level 1 -> 2: 100 XP Total
+// Level 2 -> 3: 200 XP Total
+// Level 3 -> 4: 300 XP Total
+export const XP_TABLE: number[] = [];
+for (let i = 1; i <= 100; i++) {
+    XP_TABLE.push(i * 100);
 }
 
 export const LEVEL_CHALLENGES: LevelChallenge[] = [
@@ -212,7 +187,7 @@ export const LEVEL_CHALLENGES: LevelChallenge[] = [
         ]
     },
     
-    // RETO NIVEL 3 - NUEVO (TIMELINE)
+    // RETO NIVEL 3 - (TIMELINE)
     { 
         level: 3, 
         title: "Comprar un Proyector", 
@@ -244,8 +219,26 @@ export const RANKS: Rank[] = [
 ];
 
 export const MISSIONS: Mission[] = [
-    // --- RANK 1: Espectador Novato (Level 1-4) ---
-    // Total XP disponible: ~100
+    // --- NIVEL 1 (Misiones para alcanzar Nivel 2 - 100 XP) ---
+    // Total XP disponible: 100
+    {
+        id: 'm_rate',
+        rankId: 'rank_1',
+        title: 'Primera Claqueta (Subir a Nivel 2)',
+        description: 'Marca una película como vista y dale una puntuación.',
+        xpReward: 20,
+        icon: Star,
+        condition: (user, stats) => stats.ratingsCount >= 1
+    },
+    {
+        id: 'm_review',
+        rankId: 'rank_1',
+        title: 'Pluma Afilada (Subir a Nivel 2)',
+        description: 'Escribe tu primera reseña escrita.',
+        xpReward: 20,
+        icon: MessageSquare,
+        condition: (user, stats) => stats.reviewsCount >= 1
+    },
     {
         id: 'm_avatar',
         rankId: 'rank_1',
@@ -254,33 +247,6 @@ export const MISSIONS: Mission[] = [
         xpReward: 10,
         icon: Camera,
         condition: (user) => (!!user.gamificationStats?.['update_avatar'])
-    },
-    {
-        id: 'm_feedback',
-        rankId: 'rank_1',
-        title: 'Crítico Constructivo (Subir a Nivel 2)',
-        description: 'Envía una sugerencia o reporte de bug en la sección de Feedback.',
-        xpReward: 10,
-        icon: Bug,
-        condition: (user) => !!user.gamificationStats?.['feedback']
-    },
-    {
-        id: 'm_search',
-        rankId: 'rank_1',
-        title: 'Buscador de Tesoros (Subir a Nivel 2)',
-        description: 'Usa el buscador para encontrar una película en la base de datos.',
-        xpReward: 10,
-        icon: Search,
-        condition: (user) => !!user.gamificationStats?.['search']
-    },
-    {
-        id: 'm_rate',
-        rankId: 'rank_1',
-        title: 'Primera Claqueta (Subir a Nivel 2)',
-        description: 'Marca una película como vista y dale una puntuación.',
-        xpReward: 15,
-        icon: Star,
-        condition: (user, stats) => stats.ratingsCount >= 1
     },
     {
         id: 'm_watchlist',
@@ -301,24 +267,6 @@ export const MISSIONS: Mission[] = [
         condition: (user) => !!user.gamificationStats?.['visit_events']
     },
     {
-        id: 'm_ranking',
-        rankId: 'rank_1',
-        title: 'Estudiando a los Grandes (Subir a Nivel 2)',
-        description: 'Visita el Ranking de películas y críticos.',
-        xpReward: 10,
-        icon: Trophy,
-        condition: (user) => !!user.gamificationStats?.['visit_ranking']
-    },
-    {
-        id: 'm_review',
-        rankId: 'rank_1',
-        title: 'Pluma Afilada (Subir a Nivel 2)',
-        description: 'Escribe tu primera reseña escrita.',
-        xpReward: 15,
-        icon: MessageSquare,
-        condition: (user, stats) => stats.reviewsCount >= 1
-    },
-    {
         id: 'm_ai',
         rankId: 'rank_1',
         title: 'Consultando al Oráculo (Subir a Nivel 2)',
@@ -327,14 +275,42 @@ export const MISSIONS: Mission[] = [
         icon: Sparkles,
         condition: (user) => !!user.gamificationStats?.['use_ai']
     },
+    {
+        id: 'm_feedback',
+        rankId: 'rank_1',
+        title: 'Crítico Constructivo (Subir a Nivel 2)',
+        description: 'Envía una sugerencia o reporte de bug en la sección de Feedback.',
+        xpReward: 10,
+        icon: Bug,
+        condition: (user) => !!user.gamificationStats?.['feedback']
+    },
+    {
+        id: 'm_search',
+        rankId: 'rank_1',
+        title: 'Buscador de Tesoros (Subir a Nivel 2)',
+        description: 'Usa el buscador para encontrar una película en la base de datos.',
+        xpReward: 5,
+        icon: Search,
+        condition: (user) => !!user.gamificationStats?.['search']
+    },
+    {
+        id: 'm_ranking',
+        rankId: 'rank_1',
+        title: 'Estudiando a los Grandes (Subir a Nivel 2)',
+        description: 'Visita el Ranking de películas y críticos.',
+        xpReward: 5,
+        icon: Trophy,
+        condition: (user) => !!user.gamificationStats?.['visit_ranking']
+    },
 
-    // --- LEVEL 2 TASKS (Now part of Rank 1 because Rank 2 starts at Level 5) ---
+    // --- NIVEL 2 (Misiones para alcanzar Nivel 3 - 100 XP) ---
+    // Total XP disponible: 100
     {
         id: 'm_lvl2_rate_5',
         rankId: 'rank_1', 
         title: 'Crítico en Ciernes (Subir a Nivel 3)',
         description: 'Valora 5 películas NUEVAS desde que subiste a nivel 2.',
-        xpReward: 25,
+        xpReward: 20,
         icon: Star,
         minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.ratingsCount >= 5
@@ -344,10 +320,50 @@ export const MISSIONS: Mission[] = [
         rankId: 'rank_1',
         title: 'Columnista (Subir a Nivel 3)',
         description: 'Escribe reseñas para 5 películas nuevas.',
-        xpReward: 30,
+        xpReward: 20,
         icon: PenTool,
         minLevel: 2,
         condition: (user, stats) => (user.level || 1) >= 2 && stats.reviewsCount >= 5
+    },
+    {
+        id: 'm_lvl2_feedback_5',
+        rankId: 'rank_1',
+        title: 'Beta Tester (Subir a Nivel 3)',
+        description: 'Envía 5 reportes de bug o ideas de mejora.',
+        xpReward: 10,
+        icon: Bug,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['feedback_count'] || 0) >= 5
+    },
+    {
+        id: 'm_lvl2_social',
+        rankId: 'rank_1',
+        title: 'Espíritu de Equipo (Subir a Nivel 3)',
+        description: 'Da Like o Dislike a 5 reseñas de otros usuarios.',
+        xpReward: 10,
+        icon: ThumbsUp,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['social_interactions'] || 0) >= 5
+    },
+    {
+        id: 'm_lvl2_vote',
+        rankId: 'rank_1',
+        title: 'Voto Democrático (Subir a Nivel 3)',
+        description: 'Vota por una película candidata en el Cineforum.',
+        xpReward: 10,
+        icon: Ticket,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['vote_event']
+    },
+    {
+        id: 'm_lvl2_ai_chat',
+        rankId: 'rank_1',
+        title: 'Futuro Digital (Subir a Nivel 3)',
+        description: 'Usa el chat avanzado o de voz con la IA.',
+        xpReward: 10,
+        icon: Bot,
+        minLevel: 2,
+        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['use_ai_chat']
     },
     {
         id: 'm_lvl2_news',
@@ -358,46 +374,6 @@ export const MISSIONS: Mission[] = [
         icon: Newspaper,
         minLevel: 2,
         condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['read_news']
-    },
-    {
-        id: 'm_lvl2_ai_chat',
-        rankId: 'rank_1',
-        title: 'Futuro Digital (Subir a Nivel 3)',
-        description: 'Usa el chat avanzado o de voz con la IA.',
-        xpReward: 15,
-        icon: Bot,
-        minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['use_ai_chat']
-    },
-    {
-        id: 'm_lvl2_social',
-        rankId: 'rank_1',
-        title: 'Espíritu de Equipo (Subir a Nivel 3)',
-        description: 'Da Like o Dislike a 5 reseñas de otros usuarios.',
-        xpReward: 20,
-        icon: ThumbsUp,
-        minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['social_interactions'] || 0) >= 5
-    },
-    {
-        id: 'm_lvl2_vote',
-        rankId: 'rank_1',
-        title: 'Voto Democrático (Subir a Nivel 3)',
-        description: 'Vota por una película candidata en el Cineforum.',
-        xpReward: 15,
-        icon: Ticket,
-        minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && !!user.gamificationStats?.['vote_event']
-    },
-    {
-        id: 'm_lvl2_feedback_5',
-        rankId: 'rank_1',
-        title: 'Beta Tester (Subir a Nivel 3)',
-        description: 'Envía 5 reportes de bug o ideas de mejora.',
-        xpReward: 25,
-        icon: Bug,
-        minLevel: 2,
-        condition: (user) => (user.level || 1) >= 2 && (user.gamificationStats?.['feedback_count'] || 0) >= 5
     },
     {
         id: 'm_lvl2_watchlist_5',

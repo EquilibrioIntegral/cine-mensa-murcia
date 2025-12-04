@@ -1,9 +1,11 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { LevelChallenge, Movie } from '../types';
 import { useData } from '../context/DataContext';
-import { generateTimelineScenes } from '../services/geminiService';
-import { Loader2, ArrowDown, CheckCircle, XCircle, Film, ShoppingBag, ArrowLeft, Trophy, AlertTriangle, Plus, Heart } from 'lucide-react';
+import { generateVisualTimeline } from '../services/geminiService';
+import { getMovieDetailsTMDB, getImageUrl, fetchImageAsBase64 } from '../services/tmdbService';
+import { Loader2, ArrowDown, CheckCircle, XCircle, Film, ShoppingBag, ArrowLeft, Trophy, AlertTriangle, Plus, Heart, Image as ImageIcon } from 'lucide-react';
 
 interface TimelineGameProps {
   challenge: LevelChallenge;
@@ -11,29 +13,20 @@ interface TimelineGameProps {
   onClose: () => void;
 }
 
-// --- HELPER: Image URL Generator ---
-const getSceneImageUrl = (movieTitle: string, description: string) => {
-    const visualPrompt = `cinematic movie shot from ${movieTitle}: ${description}, photorealistic, 4k, movie scene`;
-    return `https://image.pollinations.ai/prompt/${encodeURIComponent(visualPrompt)}?width=400&height=225&model=flux-realism&nologo=true`;
-};
-
 // --- SUBCOMPONENT: Placed Card (Timeline Item) ---
-const TimelineCard = ({ scene, movieTitle }: { scene: any, movieTitle: string }) => {
-    // We assume image is already cached by browser from the "Draw" phase
-    const imageUrl = getSceneImageUrl(movieTitle, scene.description);
-
+const TimelineCard = ({ scene }: { scene: any }) => {
     return (
-        <div className="flex flex-col items-center animate-scale-in w-32 md:w-44 flex-shrink-0 group select-none mx-1">
-            <div className="w-full bg-gray-900 rounded-lg border-2 border-gray-600 overflow-hidden shadow-lg group-hover:border-cine-gold transition-all flex flex-col h-full">
-                <div className="w-full h-20 md:h-28 relative flex-shrink-0">
+        <div className="flex flex-col items-center animate-scale-in w-36 md:w-48 flex-shrink-0 group select-none mx-1">
+            <div className="w-full bg-gray-900 rounded-lg border-2 border-gray-600 overflow-hidden shadow-lg group-hover:border-cine-gold transition-all flex flex-col h-full relative">
+                <div className="w-full h-24 md:h-32 relative flex-shrink-0 bg-black">
                     <img 
-                        src={imageUrl} 
+                        src={scene.realImageUrl} 
                         alt="Scene" 
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                     />
                 </div>
                 <div className="bg-black p-2 border-t border-gray-700 flex-grow flex items-center justify-center min-h-[4rem]">
-                    <p className="text-[10px] md:text-xs text-gray-300 leading-tight text-center font-medium">
+                    <p className="text-[10px] md:text-xs text-gray-300 leading-tight text-center font-medium px-1">
                         {scene.description}
                     </p>
                 </div>
@@ -52,7 +45,7 @@ const DropZone = ({ onClick, disabled }: { onClick: () => void, disabled: boolea
         <button 
             onClick={onClick}
             disabled={disabled}
-            className="group flex flex-col items-center justify-center w-8 md:w-12 mx-1 md:mx-2 transition-all flex-shrink-0 h-40 md:h-52 opacity-70 hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="group flex flex-col items-center justify-center w-10 md:w-16 mx-1 transition-all flex-shrink-0 h-44 md:h-56 opacity-70 hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
         >
             <div className="w-8 h-8 rounded-full bg-gray-800 border-2 border-gray-600 flex items-center justify-center group-hover:bg-cine-gold group-hover:border-cine-gold group-hover:scale-125 transition-all shadow-lg z-10">
                 <Plus size={16} className="text-gray-400 group-hover:text-black" />
@@ -63,11 +56,12 @@ const DropZone = ({ onClick, disabled }: { onClick: () => void, disabled: boolea
 };
 
 const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onClose }) => {
-    const { movies, user } = useData();
+    const { movies, user, tmdbToken } = useData();
     
     // Game Flow States
     const [gameState, setGameState] = useState<'intro' | 'setup' | 'playing' | 'result' | 'error'>('intro');
     const [loadingText, setLoadingText] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
     
     // Logic Data
     const [moviesToPlay, setMoviesToPlay] = useState<Movie[]>([]);
@@ -75,7 +69,6 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
     const [scenesDeck, setScenesDeck] = useState<any[]>([]);
     const [timeline, setTimeline] = useState<any[]>([]);
     const [currentCard, setCurrentCard] = useState<any>(null);
-    const [cardImageLoading, setCardImageLoading] = useState(false);
     
     // Score & Feedback
     const [lives, setLives] = useState(3);
@@ -108,7 +101,8 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
 
     const startMovie = async () => {
         setGameState('setup');
-        setLoadingText(`Revisando guion de "${moviesToPlay[currentMovieIndex].title}"...`);
+        setLoadingText(`La IA está analizando visualmente las escenas de "${moviesToPlay[currentMovieIndex].title}"...`);
+        setErrorMessage('');
         setTimeline([]);
         setScenesDeck([]);
         setCurrentCard(null);
@@ -116,19 +110,51 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
 
         try {
             const movie = moviesToPlay[currentMovieIndex];
-            const rawScenes = await generateTimelineScenes(movie.title);
             
-            if (!rawScenes || rawScenes.length < 5) throw new Error("Not enough scenes");
+            // 1. Fetch Movie Images from TMDB
+            const tmdbData = await getMovieDetailsTMDB(movie.tmdbId!, tmdbToken);
+            if (!tmdbData || !tmdbData.images?.backdrops) throw new Error("No images found");
 
-            // 1. Shuffle deck
-            const deck = [...rawScenes].sort(() => 0.5 - Math.random());
+            // 2. Select 10 high quality backdrops (Pool larger to allow filtering)
+            const availableBackdrops = tmdbData.images.backdrops
+                .slice(0, 30) // Pool of top 30
+                .sort(() => 0.5 - Math.random()) // Shuffle
+                .slice(0, 10); // Take 10 to send to AI
+
+            if (availableBackdrops.length < 5) throw new Error("Not enough backdrops");
+
+            // 3. Convert images to Base64 for Gemini
+            const imageUrls = availableBackdrops.map(img => getImageUrl(img.file_path, 'w500'));
             
-            // 2. Take first card and place it on timeline immediately (Starter card)
+            const base64Promises = imageUrls.map(url => fetchImageAsBase64(url));
+            const base64Images = await Promise.all(base64Promises);
+            
+            const validImages = base64Images.filter(img => img !== null) as string[];
+            if (validImages.length < 5) throw new Error("Failed to load images");
+
+            // 4. Send to Gemini Vision
+            const analyzedScenes = await generateVisualTimeline(movie.title, validImages);
+            
+            // 5. VALIDATION: Check if AI filtered too aggressively
+            if (!analyzedScenes || analyzedScenes.length < 3) {
+                setErrorMessage("La IA ha determinado que las imágenes disponibles no son lo suficientemente claras para contar la historia. Intentémoslo con otra película.");
+                setGameState('error');
+                return;
+            }
+
+            // 6. Construct Game Objects mapping analysis back to images
+            const finalScenes = analyzedScenes.map(scene => ({
+                id: scene.id, // Chronological Order (1-5)
+                description: scene.description,
+                realImageUrl: imageUrls[scene.originalIndex]
+            }));
+
+            // 7. Create Deck
+            // Shuffle for gameplay
+            const deck = [...finalScenes].sort(() => 0.5 - Math.random());
+            
+            // 8. Starter Card (Take one random card and place it)
             const starter = deck.pop();
-            
-            // Preload starter image
-            const starterImg = new Image();
-            starterImg.src = getSceneImageUrl(movie.title, starter.description);
             
             setTimeline([starter]);
             setScenesDeck(deck);
@@ -138,7 +164,8 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
             drawNextCard(deck);
 
         } catch (e) {
-            console.error(e);
+            console.error("Game Setup Error:", e);
+            setErrorMessage("Error técnico al conectar con los servicios de imagen.");
             setGameState('error');
         }
     };
@@ -152,23 +179,12 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
         const next = currentDeck.pop();
         setScenesDeck([...currentDeck]); // Update deck state
         setCurrentCard(next);
-        
-        // Load Image
-        setCardImageLoading(true);
-        const img = new Image();
-        img.src = getSceneImageUrl(moviesToPlay[currentMovieIndex].title, next.description);
-        img.onload = () => setCardImageLoading(false);
-        img.onerror = () => setCardImageLoading(false);
     };
 
     const handlePlaceCard = (insertIndex: number) => {
         if (feedback) return; // Prevent double clicks during anim
 
         // VALIDATION LOGIC
-        // Card is correct if:
-        // 1. Previous card (if exists) has ID < current.ID
-        // 2. Next card (if exists) has ID > current.ID
-        
         const prevCard = insertIndex > 0 ? timeline[insertIndex - 1] : null;
         const nextCard = insertIndex < timeline.length ? timeline[insertIndex] : null;
         
@@ -179,7 +195,6 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
 
         if (isCorrect) {
             setFeedback('correct');
-            // Add to timeline visually
             const newTimeline = [...timeline];
             newTimeline.splice(insertIndex, 0, currentCard);
             setTimeline(newTimeline);
@@ -195,9 +210,6 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
             if (lives <= 1) {
                 setTimeout(() => setGameState('result'), 1500); // Game Over
             } else {
-                // Auto-place it correctly or discard?
-                // Mechanics choice: Timeline usually discards. But to learn, let's place it correctly but lose a life.
-                // Find correct spot
                 const correctIndex = timeline.findIndex(c => c.id > currentCard.id);
                 const finalIndex = correctIndex === -1 ? timeline.length : correctIndex;
                 
@@ -238,6 +250,7 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
                     <ul className="text-sm text-gray-300 space-y-2">
                         <li className="flex items-center gap-2"><ArrowDown size={14}/> Saca una carta de escena.</li>
                         <li className="flex items-center gap-2"><ArrowDown size={14}/> Colócala en el orden cronológico correcto.</li>
+                        <li className="flex items-center gap-2"><ImageIcon size={14} className="text-blue-400"/> <strong>NUEVO:</strong> ¡La IA filtra las imágenes para que coincidan con el guion!</li>
                         <li className="flex items-center gap-2"><Heart size={14} className="text-red-500"/> Tienes {lives} vidas para completar 3 películas.</li>
                     </ul>
                 </div>
@@ -253,7 +266,8 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
         return (
             <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4">
                 <Loader2 size={48} className="text-cine-gold animate-spin mb-4" />
-                <h2 className="text-xl font-bold text-white">{loadingText}</h2>
+                <h2 className="text-xl font-bold text-white text-center">{loadingText}</h2>
+                <p className="text-gray-500 text-sm mt-2">Visionando fotogramas con Gemini 2.5 Flash...</p>
             </div>
         );
     }
@@ -294,9 +308,37 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
         );
     }
 
+    if (gameState === 'error') {
+        return (
+            <div className="fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-4">
+                <AlertTriangle size={48} className="text-red-500 mb-4" />
+                <h2 className="text-xl font-bold text-white">Corte de Producción</h2>
+                <p className="text-gray-400 text-center max-w-md mt-2">{errorMessage || "Error técnico inesperado."}</p>
+                
+                <div className="flex gap-4 mt-6">
+                    <button 
+                        onClick={() => {
+                            setGameState('setup');
+                            // Skip this movie and try next if available
+                            if (currentMovieIndex < TOTAL_MOVIES - 1) {
+                                setCurrentMovieIndex(i => i + 1);
+                                setTimeout(startMovie, 500);
+                            } else {
+                                onClose();
+                            }
+                        }} 
+                        className="bg-cine-gold text-black px-6 py-2 rounded-full font-bold"
+                    >
+                        Probar Siguiente Película
+                    </button>
+                    <button onClick={onClose} className="bg-gray-700 text-white px-6 py-2 rounded-full font-bold">Salir</button>
+                </div>
+            </div>
+        );
+    }
+
     // PLAYING STATE
     const currentMovie = moviesToPlay[currentMovieIndex];
-    const imageUrl = currentCard ? getSceneImageUrl(currentMovie.title, currentCard.description) : '';
 
     return (
         <div className="fixed inset-0 z-[70] bg-black flex flex-col">
@@ -322,20 +364,19 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
                 {/* Current Card Stage */}
                 <div className={`transition-all duration-500 transform ${feedback ? 'scale-90 opacity-50' : 'scale-100 opacity-100'} z-10 flex flex-col items-center`}>
                     <p className="text-cine-gold font-bold uppercase tracking-widest text-xs mb-4 animate-pulse">
-                        {cardImageLoading ? 'REVELANDO FOTOGRAMA...' : 'SIGUIENTE ESCENA'}
+                        SIGUIENTE ESCENA
                     </p>
                     
-                    <div className="w-64 md:w-80 bg-gray-900 rounded-xl border-4 border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden relative group">
-                        {cardImageLoading && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-20">
-                                <Loader2 size={48} className="text-cine-gold animate-spin" />
-                            </div>
-                        )}
-                        <div className="w-full h-48 md:h-60 relative">
-                            <img src={imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Card" />
+                    <div className="w-72 md:w-96 bg-gray-900 rounded-xl border-4 border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden relative group">
+                        <div className="w-full h-48 md:h-64 relative bg-black">
+                            <img 
+                                src={currentCard?.realImageUrl} 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
+                                alt="Scene Backdrop" 
+                            />
                         </div>
-                        <div className="bg-black/90 p-4 border-t border-gray-700 min-h-[4rem] flex items-center justify-center">
-                            <p className="text-white font-medium text-center text-sm md:text-base leading-snug">"{currentCard?.description}"</p>
+                        <div className="bg-black/90 p-6 border-t border-gray-700 min-h-[5rem] flex items-center justify-center">
+                            <p className="text-white font-medium text-center text-sm md:text-lg leading-snug">"{currentCard?.description}"</p>
                         </div>
                         
                         {/* Feedback Overlay */}
@@ -346,19 +387,21 @@ const TimelineGame: React.FC<TimelineGameProps> = ({ challenge, onComplete, onCl
                         )}
                     </div>
                     
-                    <p className="text-gray-400 text-xs mt-4 animate-fade-in opacity-80">Selecciona el hueco correcto en la línea de tiempo abajo 👇</p>
+                    <p className="text-green-400 text-xs mt-4 animate-fade-in opacity-80 flex items-center gap-1 bg-green-900/20 px-3 py-1 rounded-full border border-green-500/30">
+                        <CheckCircle size={12}/> Imagen y texto verificados por IA
+                    </p>
                 </div>
             </div>
 
             {/* Bottom Timeline (Horizontal Scroll) */}
-            <div className="h-64 bg-gray-900/95 border-t border-gray-700 backdrop-blur-md overflow-x-auto flex items-center px-4 md:px-8 gap-0 relative z-20 custom-scrollbar">
+            <div className="h-72 bg-gray-900/95 border-t border-gray-700 backdrop-blur-md overflow-x-auto flex items-center px-4 md:px-8 gap-0 relative z-20 custom-scrollbar">
                 {/* Start Drop Zone */}
-                <DropZone onClick={() => handlePlaceCard(0)} disabled={!!feedback || cardImageLoading} />
+                <DropZone onClick={() => handlePlaceCard(0)} disabled={!!feedback} />
 
                 {timeline.map((scene, idx) => (
                     <React.Fragment key={scene.id}>
-                        <TimelineCard scene={scene} movieTitle={currentMovie.title} />
-                        <DropZone onClick={() => handlePlaceCard(idx + 1)} disabled={!!feedback || cardImageLoading} />
+                        <TimelineCard scene={scene} />
+                        <DropZone onClick={() => handlePlaceCard(idx + 1)} disabled={!!feedback} />
                     </React.Fragment>
                 ))}
             </div>

@@ -1,5 +1,3 @@
-
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Movie, UserRating, CineEvent, EventCandidate, ChatMessage, User, TriviaQuestion } from "../types";
 import { findMovieByTitleAndYear, getImageUrl } from "./tmdbService";
@@ -13,7 +11,80 @@ const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
 };
 
-// --- TIMELINE GENERATOR (NEW) ---
+// --- VISUAL TIMELINE GENERATOR (NEW - VISION API) ---
+export const generateVisualTimeline = async (
+    movieTitle: string, 
+    imagesBase64: string[]
+): Promise<{ id: number, description: string, originalIndex: number }[]> => {
+    if (!isAiAvailable() || imagesBase64.length === 0) return [];
+
+    const prompt = `
+        Actúa como un experto Montador de Cine y Analista de Guiones.
+        Aquí tienes ${imagesBase64.length} fotogramas (backdrops) de la película "${movieTitle}".
+        
+        TU MISIÓN:
+        1. Identifica qué imágenes corresponden a un "Punto de Giro" o escena narrativa clara del guion.
+        2. DESCARTA (ignora) las imágenes que sean:
+           - Primeros planos genéricos sin contexto.
+           - Paisajes vacíos que no aporten trama.
+           - Imágenes promocionales que no parezcan fotogramas de la película.
+           - Imágenes duplicadas o muy similares (quédate con la mejor).
+        3. Selecciona un MÁXIMO de 5 imágenes (mínimo 3) que cuenten mejor la historia.
+        4. Para cada imagen seleccionada, escribe una "description" que explique LA ACCIÓN DEL GUION (Ej: "El villano detona la bomba" en lugar de "Fuego y humo").
+        5. Ordénalas cronológicamente.
+
+        FORMATO DE RESPUESTA (JSON Array):
+        - "id": Número secuencial del orden cronológico (1, 2, 3...).
+        - "description": La acción de la trama (breve, máx 15 palabras).
+        - "originalIndex": El índice de la imagen en el array original que te envié (0 a ${imagesBase64.length - 1}).
+
+        IMPORTANTE: Si ninguna imagen sirve o no reconoces la película, devuelve un array vacío [].
+    `;
+
+    // Construct parts: Text Prompt + Images
+    const parts: any[] = [
+        { text: prompt }
+    ];
+
+    imagesBase64.forEach(img => {
+        parts.push({
+            inlineData: {
+                mimeType: "image/jpeg",
+                data: img
+            }
+        });
+    });
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: parts }],
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.INTEGER },
+                            description: { type: Type.STRING },
+                            originalIndex: { type: Type.INTEGER }
+                        },
+                        required: ["id", "description", "originalIndex"]
+                    }
+                }
+            }
+        });
+
+        if (!response.text) return [];
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("Visual Timeline Gen Error:", String(e));
+        return [];
+    }
+};
+
+// --- TIMELINE GENERATOR (LEGACY - TEXT ONLY) ---
 export const generateTimelineScenes = async (movieTitle: string): Promise<{ id: number, description: string }[]> => {
     if (!isAiAvailable()) return [];
 

@@ -77,6 +77,16 @@ export interface TMDBWatchProviders {
   }>;
 }
 
+export interface TMDBImage {
+    aspect_ratio: number;
+    height: number;
+    iso_639_1: string | null;
+    file_path: string;
+    vote_average: number;
+    vote_count: number;
+    width: number;
+}
+
 export interface TMDBMovieDetails extends TMDBMovieResult {
   backdrop_path: string;
   genres: { id: number; name: string }[];
@@ -88,6 +98,10 @@ export interface TMDBMovieDetails extends TMDBMovieResult {
     results: TMDBVideo[];
   };
   'watch/providers'?: TMDBWatchProviders;
+  images?: {
+      backdrops: TMDBImage[];
+      posters: TMDBImage[];
+  };
   vote_average: number;
 }
 
@@ -176,9 +190,10 @@ export const getMovieDetailsTMDB = async (id: number, token: string): Promise<TM
 
   try {
     const { url, headers } = getAuthHeadersAndUrl(`/movie/${id}`, token, {
-        append_to_response: 'credits,videos,watch/providers', // Request videos and providers
+        append_to_response: 'credits,videos,watch/providers,images', // Request videos, providers, and images
         language: 'es-ES',
-        include_video_language: 'es,en' // Get Spanish first, fallback to English if needed
+        include_video_language: 'es,en', // Get Spanish first, fallback to English if needed
+        include_image_language: 'en,null' // Get unlocalized images (best for backdrops)
     });
 
     const response = await fetch(url, { headers });
@@ -198,4 +213,26 @@ export const getMovieDetailsTMDB = async (id: number, token: string): Promise<TM
 export const getImageUrl = (path: string | null, size: 'w200' | 'w500' | 'original' = 'w500') => {
   if (!path) return 'https://via.placeholder.com/500x750?text=No+Image';
   return `https://image.tmdb.org/t/p/${size}${path}`;
+};
+
+// --- NEW HELPER FOR AI VISION ---
+export const fetchImageAsBase64 = async (imageUrl: string): Promise<string | null> => {
+    try {
+        // TMDB allows CORS, so we can fetch directly in browser
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64data = reader.result as string;
+                // Remove data:image/jpeg;base64, prefix for API
+                const rawBase64 = base64data.split(',')[1];
+                resolve(rawBase64);
+            };
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("Error fetching image for AI:", e);
+        return null;
+    }
 };
