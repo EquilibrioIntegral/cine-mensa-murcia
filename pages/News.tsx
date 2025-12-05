@@ -238,11 +238,12 @@ const News: React.FC = () => {
               {/* ONLINE USERS WIDGET (PREMIUM FEATURE) - Moved Here */}
               {hasOnlineTracker && <OnlineUsersWidget />}
 
-              <div className="bg-black/40 rounded-xl border border-gray-800 overflow-hidden">
+              <div className="bg-black/40 rounded-xl border border-gray-800 overflow-hidden flex flex-col h-fit">
                   <div className="p-4 border-b border-gray-800 flex items-center gap-2 bg-cine-gold/5">
                       <CheckCircle className="text-green-500" size={20} />
                       <h3 className="font-bold text-white">Mejoras Recientes</h3>
                   </div>
+                  
                   <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar">
                       {updates.length === 0 ? (
                           <p className="text-gray-500 text-sm text-center py-8 opacity-50">Todo funciona correctamente.</p>
@@ -256,25 +257,17 @@ const News: React.FC = () => {
                           ))
                       )}
                   </div>
-                  <div className="p-3 bg-gray-900 border-t border-gray-800 text-center">
+
+                  {/* MERGED FOOTER: CTA for Bugs/Ideas */}
+                  <div className="p-4 bg-gray-900/80 border-t border-gray-800 text-center">
+                      <p className="text-[10px] text-gray-500 uppercase font-bold mb-2 tracking-wider">¿Tienes una idea o encontraste un fallo?</p>
                       <button 
                         onClick={() => setView(ViewState.FEEDBACK)}
-                        className="text-xs text-gray-400 hover:text-cine-gold flex items-center justify-center gap-2 w-full transition-colors"
+                        className="bg-purple-900/20 hover:bg-purple-900/40 text-purple-300 border border-purple-500/30 px-4 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 w-full transition-all"
                       >
-                          <Bug size={12} /> Reportar nuevo bug o idea
+                          <Bug size={14} /> Reportar Bug o Sugerencia
                       </button>
                   </div>
-              </div>
-
-              <div className="bg-gradient-to-br from-purple-900/10 to-black p-6 rounded-xl border border-purple-500/20 text-center">
-                  <h4 className="text-purple-400 font-bold mb-2 flex items-center justify-center gap-2"><AlertCircle size={16}/> ¿Tienes una idea?</h4>
-                  <p className="text-gray-400 text-sm mb-4">Ayúdanos a mejorar la plataforma sugiriendo nuevas funciones para el club.</p>
-                  <button 
-                    onClick={() => setView(ViewState.FEEDBACK)}
-                    className="bg-purple-600/20 text-purple-300 border border-purple-500/50 px-4 py-2 rounded-lg text-sm font-bold hover:bg-purple-600 hover:text-white transition-all w-full"
-                  >
-                      Enviar Sugerencia
-                  </button>
               </div>
           </div>
       </div>

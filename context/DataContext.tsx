@@ -1,8 +1,9 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { auth, db } from '../firebase';
 import { 
   collection, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, 
-  onSnapshot, query, where, orderBy, arrayUnion, arrayRemove, increment, limit 
+  onSnapshot, query, where, orderBy, arrayUnion, arrayRemove, increment, limit, writeBatch, getDocs
 } from 'firebase/firestore';
 import { 
   signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, 
@@ -225,6 +226,37 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const checkMissions = (userId: string) => { /* Placeholder */ };
 
+  // --- HELPER: Recalculate Movie Stats ---
+  const recalculateMovieRating = async (movieId: string) => {
+      try {
+          // Fetch all ratings for this movie
+          const q = query(collection(db, 'ratings'), where('movieId', '==', movieId));
+          const querySnapshot = await getDocs(q);
+          
+          let totalSum = 0;
+          let count = 0;
+          
+          querySnapshot.forEach((doc) => {
+              const r = doc.data();
+              if (typeof r.rating === 'number') {
+                  totalSum += r.rating;
+                  count++;
+              }
+          });
+
+          const newAverage = count > 0 ? totalSum / count : 0;
+
+          // Update Movie Document with new stats
+          await updateDoc(doc(db, 'movies', movieId), {
+              rating: newAverage,
+              totalVotes: count
+          });
+          
+      } catch (error) {
+          console.error("Error recalculating movie stats:", error);
+      }
+  };
+
   const rateMovie = async (movieId: string, detailed: any, comment: string, spoiler?: string) => {
       if (!user) return;
       const ratingData: UserRating = {
@@ -236,23 +268,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           spoiler,
           timestamp: Date.now()
       };
+      
+      // 1. Save or Update individual rating
       await setDoc(doc(db, 'ratings', `${user.id}_${movieId}`), ratingData);
       
+      // 2. Update User lists if needed
       if (!user.watchedMovies.includes(movieId)) {
           await updateDoc(doc(db, 'users', user.id), {
               watchedMovies: arrayUnion(movieId),
               watchlist: arrayRemove(movieId)
           });
       }
+
+      // 3. Trigger recalculation of global average
+      await recalculateMovieRating(movieId);
+
       checkMissions(user.id);
   };
 
   const unwatchMovie = async (movieId: string) => {
       if (!user) return;
+      // 1. Delete rating
       await deleteDoc(doc(db, 'ratings', `${user.id}_${movieId}`));
+      // 2. Update user lists
       await updateDoc(doc(db, 'users', user.id), {
           watchedMovies: arrayRemove(movieId)
       });
+      // 3. Recalculate global average (will decrease count)
+      await recalculateMovieRating(movieId);
   };
 
   const toggleWatchlist = async (movieId: string) => {
@@ -310,31 +353,52 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await setDoc(doc(db, 'config', 'general'), { tmdbToken: token }, { merge: true });
   };
   
-  // Messaging
+  // --- MESSAGING SYSTEM (REWRITTEN) ---
   const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
-      await addDoc(collection(db, `users/${userId}/mailbox`), {
+      await addDoc(collection(db, 'users', userId, 'mailbox'), {
           title, body, type, actionMovieId, actionEventId, timestamp: Date.now(), read: false
       });
   };
+
   const markMessageRead = async (msgId: string) => {
-      if(user) {
-          try {
-              await updateDoc(doc(db, `users/${user.id}/mailbox`, msgId), { read: true });
-          } catch(e) {
-              console.warn("Could not mark message as read (might be deleted):", e);
-          }
+      if(!user) return;
+      try {
+          const msgRef = doc(db, 'users', user.id, 'mailbox', msgId);
+          await updateDoc(msgRef, { read: true });
+      } catch(e) {
+          console.warn("Could not mark message as read (might be deleted):", e);
       }
   }
-  const deleteMessage = async (msgId: string) => {
-      // Use auth.currentUser to ensure we are deleting for the currently signed-in user safely
-      const currentUser = auth.currentUser;
-      if(currentUser) {
-          try {
-              await deleteDoc(doc(db, `users/${currentUser.uid}/mailbox`, msgId));
-          } catch(e) {
-              console.error("Could not delete message:", e);
-              throw e; // Propagate error
+
+  const markAllMessagesRead = async () => {
+      if(!user || mailbox.length === 0) return;
+      
+      const batch = writeBatch(db);
+      let count = 0;
+      
+      mailbox.forEach(msg => {
+          if (!msg.read) {
+              const ref = doc(db, 'users', user.id, 'mailbox', msg.id);
+              batch.update(ref, { read: true });
+              count++;
           }
+      });
+
+      if (count > 0) {
+          await batch.commit();
+      }
+  };
+
+  const deleteMessage = async (msgId: string) => {
+      if(!user) return;
+      try {
+          // Explicit path to ensure correct deletion
+          const msgRef = doc(db, 'users', user.id, 'mailbox', msgId);
+          await deleteDoc(msgRef);
+          return true;
+      } catch(e) {
+          console.error("Could not delete message:", e);
+          throw e;
       }
   }
 
@@ -758,7 +822,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setView, login, register, logout, resetPassword,
     addMovie, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote,
     approveUser, rejectUser, deleteUserAccount, toggleUserAdmin, updateUserProfile,
-    setTmdbToken, sendSystemMessage, markMessageRead, deleteMessage,
+    setTmdbToken, sendSystemMessage, markMessageRead, markAllMessagesRead, deleteMessage,
     publishNews, deleteNews, sendFeedback, resolveFeedback, deleteFeedback,
     resetGamification, resetAutomation, auditQuality,
     createEvent, closeEvent, voteForCandidate, transitionEventPhase, toggleEventCommitment, toggleTimeVote, proposeMeetupLocation, voteMeetupLocation,
