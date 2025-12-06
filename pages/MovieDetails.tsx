@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 import { getMovieDetailsTMDB, TMDBMovieDetails, getImageUrl, TMDBProvider } from '../services/tmdbService';
-import { ArrowLeft, Star, Check, PlayCircle, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil, PlusCircle, Users } from 'lucide-react';
+import { ArrowLeft, Star, Check, PlayCircle, Play, MonitorPlay, ShoppingBag, Banknote, Bookmark, Eye, BookmarkCheck, EyeOff, AlertTriangle, ExternalLink, ThumbsUp, ThumbsDown, MessageSquare, Lock, Clapperboard, Phone, Pencil, PlusCircle, Users } from 'lucide-react';
 import { ViewState, DetailedRating, UserRating, User } from '../types';
 import RatingModal from '../components/RatingModal';
 import QuizModal from '../components/QuizModal';
@@ -665,20 +665,37 @@ const MovieDetails: React.FC = () => {
                   </section>
               )}
 
-              {/* Trailer Button Only */}
+              {/* Trailer Section - Link to YouTube */}
               {trailer && (
-                  <section>
-                       <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3">Tráiler</h3>
-                       <a 
-                          href={`https://www.youtube.com/watch?v=${trailer.key}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-3 transition-colors shadow-lg group"
-                       >
-                           <PlayCircle size={32} className="group-hover:scale-110 transition-transform" />
-                           Ver Tráiler Oficial en YouTube
-                           <ExternalLink size={16} className="opacity-50" />
-                       </a>
+                  <section className="animate-fade-in relative">
+                       <h3 className="text-2xl font-bold text-white mb-4 border-l-4 border-cine-gold pl-3 flex items-center gap-2">
+                           <PlayCircle size={24} className="text-cine-gold"/> Tráiler
+                       </h3>
+                       
+                       <div className="aspect-video w-full rounded-xl overflow-hidden shadow-2xl border border-gray-800 bg-black relative group">
+                           <a 
+                               href={`https://www.youtube.com/watch?v=${trailer.key}`} 
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               className="absolute inset-0 w-full h-full block cursor-pointer group"
+                           >
+                               <img 
+                                   src={`https://img.youtube.com/vi/${trailer.key}/maxresdefault.jpg`}
+                                   onError={(e) => { (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${trailer.key}/hqdefault.jpg`; }}
+                                   alt="Trailer Thumbnail"
+                                   className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-300"
+                               />
+                               <div className="absolute inset-0 flex items-center justify-center">
+                                   <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform duration-300 group-hover:bg-red-500">
+                                       <Play size={40} fill="white" className="text-white ml-1" />
+                                   </div>
+                               </div>
+                               <div className="absolute bottom-4 left-4 right-4 text-left">
+                                   <p className="text-white font-bold text-lg drop-shadow-md truncate">{trailer.name}</p>
+                                   <p className="text-gray-300 text-sm flex items-center gap-1">Ver en YouTube <ExternalLink size={12}/></p>
+                               </div>
+                           </a>
+                       </div>
                   </section>
               )}
           </div>

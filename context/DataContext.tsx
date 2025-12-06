@@ -15,7 +15,8 @@ import {
   PrivateChatMessage, TriviaMatch, TriviaQuestion, EventCandidate 
 } from '../types';
 import { STARTER_AVATARS } from '../constants';
-import { getMovieDetailsTMDB, getImageUrl } from '../services/tmdbService';
+import { getMovieDetailsTMDB, getImageUrl, searchMoviesTMDB, searchPersonTMDB } from '../services/tmdbService';
+import { generateCinemaNews } from '../services/geminiService';
 
 const DataContext = createContext<any>(null);
 
@@ -43,6 +44,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [tmdbToken, setTmdbTokenState] = useState('');
   const [notification, setNotification] = useState<{type: string, message: string} | null>(null);
   const [milestoneEvent, setMilestoneEvent] = useState<any>(null);
+  
+  // Automation State
   const [automationStatus, setAutomationStatus] = useState({ dailyCount: 0, isGenerating: false, lastRun: 0, nextRun: 0 });
   
   // Live & Chat
@@ -77,6 +80,126 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
       fetchConfig();
   }, []);
+
+  // --- AUTOMATION ENGINE ---
+  // Runs periodically to check if news should be generated
+  useEffect(() => {
+      // Only run automation if user is admin to prevent client-side race conditions or API spam from regular users
+      if (!user?.isAdmin) return;
+
+      const checkNewsAutomation = async () => {
+          try {
+              const docRef = doc(db, 'config', 'news_automation');
+              const docSnap = await getDoc(docRef);
+              
+              let status = docSnap.exists() ? docSnap.data() : { 
+                  dailyCount: 0, 
+                  lastRun: 0, 
+                  nextRun: 0, 
+                  date: new Date().toLocaleDateString() 
+              };
+
+              // 1. Daily Reset Check
+              const today = new Date().toLocaleDateString();
+              if (status.date !== today) {
+                  status = { dailyCount: 0, lastRun: 0, nextRun: 0, date: today };
+                  await setDoc(docRef, status);
+              }
+
+              // Update local state for UI
+              setAutomationStatus(prev => ({
+                  ...prev,
+                  dailyCount: status.dailyCount,
+                  lastRun: status.lastRun,
+                  nextRun: status.nextRun,
+                  isGenerating: prev.isGenerating // Keep local loading state
+              }));
+
+              // 2. Trigger Check
+              // Conditions: Not currently generating, Count < 10, Time > NextRun
+              const now = Date.now();
+              // Allow a small buffer or strictly checks
+              if (!automationStatus.isGenerating && status.dailyCount < 10 && now > status.nextRun) {
+                  
+                  // LOCK START
+                  setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
+                  console.log("⚡ Auto-News Triggered");
+
+                  // Generate Content
+                  const existingTitles = news.map(n => n.title);
+                  const newArticles = await generateCinemaNews(existingTitles);
+
+                  if (newArticles.length > 0) {
+                      for (const article of newArticles) {
+                          let imageUrl = '';
+                          
+                          // Try to get real image from TMDB
+                          if (article.searchQuery && tmdbToken) {
+                              try {
+                                  const searchRes = await searchMoviesTMDB(article.searchQuery, tmdbToken);
+                                  const bestMovie = searchRes.find(m => m.backdrop_path) || searchRes[0];
+                                  if (bestMovie) {
+                                      imageUrl = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
+                                  } else {
+                                      // Try Person
+                                      const personRes = await searchPersonTMDB(article.searchQuery, tmdbToken);
+                                      const bestPerson = personRes.find(p => p.profile_path);
+                                      if (bestPerson) {
+                                          imageUrl = getImageUrl(bestPerson.profile_path, 'original');
+                                      }
+                                  }
+                              } catch (e) {
+                                  console.warn("Auto-News Image Search Failed:", e);
+                              }
+                          }
+
+                          // Fallback to AI Image
+                          if (!imageUrl && article.visualPrompt) {
+                              imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
+                          }
+
+                          // Publish
+                          await addDoc(collection(db, 'news'), {
+                              title: article.title,
+                              content: article.content,
+                              type: 'general',
+                              imageUrl: imageUrl,
+                              timestamp: Date.now()
+                          });
+                      }
+
+                      // Update Config
+                      const newCount = status.dailyCount + newArticles.length;
+                      const nextRun = Date.now() + (2 * 60 * 60 * 1000); // 2 Hours from now
+
+                      await setDoc(docRef, {
+                          dailyCount: newCount,
+                          lastRun: Date.now(),
+                          nextRun: nextRun,
+                          date: today
+                      });
+                      
+                      console.log(`✅ Auto-News: Published ${newArticles.length} articles.`);
+                  } else {
+                      console.log("⚠️ Auto-News: No new articles generated.");
+                  }
+
+                  // UNLOCK
+                  setAutomationStatus(prev => ({ ...prev, isGenerating: false }));
+              }
+
+          } catch (e) {
+              console.error("Automation Engine Error:", e);
+              setAutomationStatus(prev => ({ ...prev, isGenerating: false }));
+          }
+      };
+
+      // Run check immediately on mount, then every 60 seconds
+      checkNewsAutomation();
+      const interval = setInterval(checkNewsAutomation, 60000); 
+
+      return () => clearInterval(interval);
+  }, [user?.isAdmin, user?.id, tmdbToken, news.length]); // Dependencies to ensure fresh data
 
   // Firebase Listeners
   useEffect(() => {
@@ -228,6 +351,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- HELPER: Recalculate Movie Stats ---
   const recalculateMovieRating = async (movieId: string) => {
+      // FIX: Increase delay to ensure Firestore writes have propagated to indices/reads
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
       try {
           // Fetch all ratings for this movie
           const q = query(collection(db, 'ratings'), where('movieId', '==', movieId));
@@ -238,7 +364,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           
           querySnapshot.forEach((doc) => {
               const r = doc.data();
-              if (typeof r.rating === 'number') {
+              if (typeof r.rating === 'number' && !isNaN(r.rating)) {
                   totalSum += r.rating;
                   count++;
               }
@@ -416,7 +542,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const resetGamification = async () => {
       allUsers.forEach(u => updateDoc(doc(db, 'users', u.id), { xp: 0, level: 1, credits: 0, completedMissions: [] }));
   };
-  const resetAutomation = () => setAutomationStatus({ ...automationStatus, isGenerating: false });
+  
+  const resetAutomation = () => {
+      // Force reset local state and also update DB to allow immediate run
+      setAutomationStatus({ dailyCount: 0, isGenerating: false, lastRun: 0, nextRun: 0 });
+      setDoc(doc(db, 'config', 'news_automation'), { 
+          dailyCount: 0, 
+          lastRun: 0, 
+          nextRun: 0, 
+          date: new Date().toLocaleDateString() 
+      });
+  };
+
   const auditQuality = async () => 0;
 
   // Events

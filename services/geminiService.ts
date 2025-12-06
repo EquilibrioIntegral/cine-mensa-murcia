@@ -436,25 +436,16 @@ export const generateCinemaNews = async (existingNewsTitles: string[] = []): Pro
         ⛔️ LISTA DE EXCLUSIÓN (TEMAS PROHIBIDOS/YA PUBLICADOS/BORRADOS):
         ${exclusionList}
         
-        INSTRUCCIONES DE SEGURIDAD ANTI-DUPLICADOS:
-        1. Comprueba la lista de exclusión. Si una noticia trata sobre el mismo tema principal (aunque el título sea diferente), DESCÁRTALA.
-        2. Ej: Si "Zootropolis 2" está en la lista, NO generes nada sobre Zootropolis 2.
-        3. Si no encuentras ninguna noticia 100% nueva e impactante que no esté en la lista, devuelve un array vacío [].
-        4. Es preferible devolver [] a repetir contenido.
-        
-        Para cada noticia genera:
-        1. "title": Un titular periodístico en español atractivo.
-        2. "content": Un ARTÍCULO PERIODÍSTICO COMPLETO y EXTENSO (Mínimo 3 párrafos).
-        3. "visualPrompt": Una descripción en INGLÉS para generar una imagen IA (solo si falla TMDB).
-        4. "searchQuery": EL TÍTULO EXACTO DE LA PELÍCULA O ACTOR. 
-           - IMPORTANTE: Solo el nombre. Sin "Trailer", sin "Estreno", sin "Noticia". 
-           - Ejemplo MAL: "Trailer de Mufasa". Ejemplo BIEN: "Mufasa: The Lion King".
-           - Esto se usará para buscar la foto real en una base de datos. Sé preciso.
+        Genera un JSON Array con las noticias encontradas (Máximo 3).
+        Formato exacto de cada objeto:
+        {
+            "title": "Titular impactante en español",
+            "content": "Artículo completo en español (min 3 párrafos)",
+            "visualPrompt": "Description in English for image generation",
+            "searchQuery": "Nombre exacto de la película o actor para buscar foto"
+        }
 
-        Formato JSON Array PURO (Sin markdown):
-        [
-          { "title": "...", "content": "...", "visualPrompt": "...", "searchQuery": "..." }
-        ]
+        IMPORTANTE: Devuelve SOLO el JSON limpio.
     `;
 
     try {
@@ -468,11 +459,11 @@ export const generateCinemaNews = async (existingNewsTitles: string[] = []): Pro
 
         let text = response.text || "";
         
-        // CLEANUP: Remove markdown code blocks if present
-        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        // CLEANUP: Force remove markdown code blocks
+        text = text.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '').trim();
         
         try {
-            // Attempt to find the array bracket
+            // Robust parsing: Find the outer brackets in case of extra text
             const start = text.indexOf('[');
             const end = text.lastIndexOf(']');
             if (start !== -1 && end !== -1) {
@@ -481,6 +472,7 @@ export const generateCinemaNews = async (existingNewsTitles: string[] = []): Pro
 
             const parsed = JSON.parse(text);
             if (Array.isArray(parsed)) return parsed;
+            // Force array return if single object
             if (typeof parsed === 'object') return [parsed];
             return [];
         } catch (e) {
