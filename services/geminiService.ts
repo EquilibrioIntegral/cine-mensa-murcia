@@ -431,21 +431,21 @@ export const generateCinemaNews = async (existingNewsTitles: string[] = []): Pro
     const exclusionList = recentTitles.join(", ");
 
     const prompt = `
-        Utiliza la herramienta Google Search para buscar las noticias de cine más importantes y recientes de las últimas 24 HORAS.
+        Utiliza la herramienta Google Search para buscar UNA (1) noticia de cine importante y reciente de las últimas 24 HORAS.
         
         ⛔️ LISTA DE EXCLUSIÓN (TEMAS PROHIBIDOS/YA PUBLICADOS/BORRADOS):
         ${exclusionList}
         
-        Genera un JSON Array con las noticias encontradas (Máximo 3).
-        Formato exacto de cada objeto:
-        {
+        Genera un JSON Array con ESA ÚNICA noticia.
+        Formato exacto:
+        [{
             "title": "Titular impactante en español",
             "content": "Artículo completo en español (min 3 párrafos)",
             "visualPrompt": "Description in English for image generation",
             "searchQuery": "Nombre exacto de la película o actor para buscar foto"
-        }
+        }]
 
-        IMPORTANTE: Devuelve SOLO el JSON limpio.
+        IMPORTANTE: Devuelve SOLO el JSON limpio. SOLO 1 NOTICIA.
     `;
 
     try {

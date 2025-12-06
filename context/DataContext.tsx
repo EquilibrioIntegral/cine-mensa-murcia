@@ -118,58 +118,60 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               // 2. Trigger Check
               // Conditions: Not currently generating, Count < 10, Time > NextRun
               const now = Date.now();
-              // Allow a small buffer or strictly checks
               if (!automationStatus.isGenerating && status.dailyCount < 10 && now > status.nextRun) {
                   
                   // LOCK START
                   setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
                   console.log("⚡ Auto-News Triggered");
 
-                  // Generate Content
+                  // Generate Content (JUST ONE)
                   const existingTitles = news.map(n => n.title);
                   const newArticles = await generateCinemaNews(existingTitles);
 
+                  // STRICTLY PROCESS ONLY 1 ARTICLE (Index 0)
                   if (newArticles.length > 0) {
-                      for (const article of newArticles) {
-                          let imageUrl = '';
-                          
-                          // Try to get real image from TMDB
-                          if (article.searchQuery && tmdbToken) {
-                              try {
-                                  const searchRes = await searchMoviesTMDB(article.searchQuery, tmdbToken);
-                                  const bestMovie = searchRes.find(m => m.backdrop_path) || searchRes[0];
-                                  if (bestMovie) {
-                                      imageUrl = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
-                                  } else {
-                                      // Try Person
-                                      const personRes = await searchPersonTMDB(article.searchQuery, tmdbToken);
-                                      const bestPerson = personRes.find(p => p.profile_path);
-                                      if (bestPerson) {
-                                          imageUrl = getImageUrl(bestPerson.profile_path, 'original');
-                                      }
+                      const article = newArticles[0];
+                      let imageUrl = '';
+                      
+                      // 1. Priority: Real Image from TMDB
+                      if (article.searchQuery && tmdbToken) {
+                          try {
+                              // Try Movie Search First
+                              const searchRes = await searchMoviesTMDB(article.searchQuery, tmdbToken);
+                              const bestMovie = searchRes.find(m => m.backdrop_path) || searchRes.find(m => m.poster_path);
+                              
+                              if (bestMovie) {
+                                  imageUrl = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
+                              } else {
+                                  // Fallback: Person Search
+                                  const personRes = await searchPersonTMDB(article.searchQuery, tmdbToken);
+                                  const bestPerson = personRes.find(p => p.profile_path);
+                                  if (bestPerson) {
+                                      imageUrl = getImageUrl(bestPerson.profile_path, 'original');
                                   }
-                              } catch (e) {
-                                  console.warn("Auto-News Image Search Failed:", e);
                               }
+                          } catch (e) {
+                              console.warn("Auto-News Image Search Failed:", e);
                           }
-
-                          // Fallback to AI Image
-                          if (!imageUrl && article.visualPrompt) {
-                              imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
-                          }
-
-                          // Publish
-                          await addDoc(collection(db, 'news'), {
-                              title: article.title,
-                              content: article.content,
-                              type: 'general',
-                              imageUrl: imageUrl,
-                              timestamp: Date.now()
-                          });
                       }
 
+                      // 2. Fallback: AI Generation (Only if TMDB failed)
+                      if (!imageUrl && article.visualPrompt) {
+                          imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
+                      }
+
+                      // Publish Single Article
+                      await addDoc(collection(db, 'news'), {
+                          title: article.title,
+                          content: article.content,
+                          type: 'general',
+                          imageUrl: imageUrl,
+                          timestamp: Date.now()
+                      });
+
                       // Update Config
-                      const newCount = status.dailyCount + newArticles.length;
+                      // Increase count by 1, Set timer to +2 hours
+                      const newCount = status.dailyCount + 1;
                       const nextRun = Date.now() + (2 * 60 * 60 * 1000); // 2 Hours from now
 
                       await setDoc(docRef, {
@@ -179,7 +181,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                           date: today
                       });
                       
-                      console.log(`✅ Auto-News: Published ${newArticles.length} articles.`);
+                      console.log(`✅ Auto-News: Published "${article.title}". Next run in 2h.`);
                   } else {
                       console.log("⚠️ Auto-News: No new articles generated.");
                   }
@@ -481,16 +483,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   // --- MESSAGING SYSTEM (REWRITTEN) ---
   const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
-      await addDoc(collection(db, 'users', userId, 'mailbox'), {
-          title, body, type, actionMovieId, actionEventId, timestamp: Date.now(), read: false
-      });
+      // Firestore does not accept 'undefined' values. We omit them or pass null.
+      const messageData = {
+          title, 
+          body, 
+          type, 
+          timestamp: Date.now(), 
+          read: false,
+          ...(actionMovieId ? { actionMovieId } : {}),
+          ...(actionEventId ? { actionEventId } : {})
+      };
+      await addDoc(collection(db, 'users', userId, 'mailbox'), messageData);
   };
 
   const markMessageRead = async (msgId: string) => {
       if(!user) return;
       try {
-          const msgRef = doc(db, 'users', user.id, 'mailbox', msgId);
-          await updateDoc(msgRef, { read: true });
+          const path = `users/${user.id}/mailbox/${msgId}`;
+          await updateDoc(doc(db, path), { read: true });
       } catch(e) {
           console.warn("Could not mark message as read (might be deleted):", e);
       }
@@ -504,7 +514,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       mailbox.forEach(msg => {
           if (!msg.read) {
-              const ref = doc(db, 'users', user.id, 'mailbox', msg.id);
+              // Explicit path for robustness
+              const path = `users/${user.id}/mailbox/${msg.id}`;
+              const ref = doc(db, path);
               batch.update(ref, { read: true });
               count++;
           }
@@ -516,11 +528,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteMessage = async (msgId: string) => {
-      if(!user) return;
+      if(!user) throw new Error("User not authenticated");
       try {
-          // Explicit path to ensure correct deletion
-          const msgRef = doc(db, 'users', user.id, 'mailbox', msgId);
-          await deleteDoc(msgRef);
+          // Explicit string path to ensure correct deletion and avoid undefined segment issues
+          const path = `users/${user.id}/mailbox/${msgId}`;
+          console.log("Deleting message at:", path);
+          await deleteDoc(doc(db, path));
           return true;
       } catch(e) {
           console.error("Could not delete message:", e);
