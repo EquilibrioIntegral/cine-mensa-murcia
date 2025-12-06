@@ -30,7 +30,7 @@ const Profile: React.FC = () => {
       return () => setInitialProfileTab('profile');
   }, []); // Only on mount
 
-  // FORCE DB REFRESH ON CAREER TAB
+  // FORCE DB REFRESH ON CAREER TAB to sync XP
   useEffect(() => {
       if (activeTab === 'career') {
           refreshUser();

@@ -1,9 +1,9 @@
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { auth, db } from '../firebase';
 import { 
   collection, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, 
-  onSnapshot, query, where, orderBy, arrayUnion, arrayRemove, increment, limit, writeBatch, getDocs
+  onSnapshot, query, where, orderBy, arrayUnion, arrayRemove, increment, limit, writeBatch, getDocs, runTransaction
 } from 'firebase/firestore';
 import { 
   signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, 
@@ -47,6 +47,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   // Automation State
   const [automationStatus, setAutomationStatus] = useState({ dailyCount: 0, isGenerating: false, lastRun: 0, nextRun: 0 });
+  const isGeneratingRef = useRef(false); // Ref for lock to prevent race conditions across renders
   
   // Live & Chat
   const [liveSession, setLiveSession] = useState<LiveSessionState>({
@@ -82,126 +83,129 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   // --- AUTOMATION ENGINE ---
-  // Runs periodically to check if news should be generated
   useEffect(() => {
-      // Only run automation if user is admin to prevent client-side race conditions or API spam from regular users
       if (!user?.isAdmin) return;
 
       const checkNewsAutomation = async () => {
+          // Double lock: Ref + SessionStorage
+          if (isGeneratingRef.current || sessionStorage.getItem('generating_news') === 'true') return;
+
           try {
               const docRef = doc(db, 'config', 'news_automation');
-              const docSnap = await getDoc(docRef);
-              
-              let status = docSnap.exists() ? docSnap.data() : { 
-                  dailyCount: 0, 
-                  lastRun: 0, 
-                  nextRun: 0, 
-                  date: new Date().toLocaleDateString() 
-              };
+              let shouldRun = false;
 
-              // 1. Daily Reset Check
-              const today = new Date().toLocaleDateString();
-              if (status.date !== today) {
-                  status = { dailyCount: 0, lastRun: 0, nextRun: 0, date: today };
-                  await setDoc(docRef, status);
-              }
+              // Use Transaction to prevent race conditions between tabs/clients
+              await runTransaction(db, async (transaction) => {
+                  const docSnap = await transaction.get(docRef);
+                  let status = docSnap.exists() ? docSnap.data() : { 
+                      dailyCount: 0, 
+                      lastRun: 0, 
+                      nextRun: 0, 
+                      date: new Date().toLocaleDateString() 
+                  };
 
-              // Update local state for UI
-              setAutomationStatus(prev => ({
-                  ...prev,
-                  dailyCount: status.dailyCount,
-                  lastRun: status.lastRun,
-                  nextRun: status.nextRun,
-                  isGenerating: prev.isGenerating // Keep local loading state
-              }));
+                  const today = new Date().toLocaleDateString();
+                  // Reset if new day
+                  if (status.date !== today) {
+                      status = { dailyCount: 0, lastRun: 0, nextRun: 0, date: today };
+                  }
 
-              // 2. Trigger Check
-              // Conditions: Not currently generating, Count < 10, Time > NextRun
-              const now = Date.now();
-              if (!automationStatus.isGenerating && status.dailyCount < 10 && now > status.nextRun) {
-                  
-                  // LOCK START
-                  setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
-                  console.log("⚡ Auto-News Triggered");
+                  // Update local state for UI visibility
+                  setAutomationStatus(prev => ({
+                      ...prev,
+                      dailyCount: status.dailyCount,
+                      lastRun: status.lastRun,
+                      nextRun: status.nextRun
+                  }));
 
-                  // Generate Content (JUST ONE)
-                  const existingTitles = news.map(n => n.title);
-                  const newArticles = await generateCinemaNews(existingTitles);
-
-                  // STRICTLY PROCESS ONLY 1 ARTICLE (Index 0)
-                  if (newArticles.length > 0) {
-                      const article = newArticles[0];
-                      let imageUrl = '';
+                  // Check Trigger Condition
+                  const now = Date.now();
+                  if (status.dailyCount < 10 && now > status.nextRun) {
+                      shouldRun = true;
                       
-                      // 1. Priority: Real Image from TMDB
-                      if (article.searchQuery && tmdbToken) {
-                          try {
-                              // Try Movie Search First
-                              const searchRes = await searchMoviesTMDB(article.searchQuery, tmdbToken);
-                              const bestMovie = searchRes.find(m => m.backdrop_path) || searchRes.find(m => m.poster_path);
-                              
-                              if (bestMovie) {
-                                  imageUrl = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
-                              } else {
-                                  // Fallback: Person Search
-                                  const personRes = await searchPersonTMDB(article.searchQuery, tmdbToken);
-                                  const bestPerson = personRes.find(p => p.profile_path);
-                                  if (bestPerson) {
-                                      imageUrl = getImageUrl(bestPerson.profile_path, 'original');
-                                  }
-                              }
-                          } catch (e) {
-                              console.warn("Auto-News Image Search Failed:", e);
-                          }
-                      }
-
-                      // 2. Fallback: AI Generation (Only if TMDB failed)
-                      if (!imageUrl && article.visualPrompt) {
-                          imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
-                      }
-
-                      // Publish Single Article
-                      await addDoc(collection(db, 'news'), {
-                          title: article.title,
-                          content: article.content,
-                          type: 'general',
-                          imageUrl: imageUrl,
-                          timestamp: Date.now()
-                      });
-
-                      // Update Config
-                      // Increase count by 1, Set timer to +2 hours
+                      // Reserve slot immediately in DB
                       const newCount = status.dailyCount + 1;
-                      const nextRun = Date.now() + (2 * 60 * 60 * 1000); // 2 Hours from now
-
-                      await setDoc(docRef, {
+                      const nextRun = Date.now() + (2 * 60 * 60 * 1000); // 2 Hours
+                      
+                      transaction.set(docRef, {
                           dailyCount: newCount,
                           lastRun: Date.now(),
                           nextRun: nextRun,
                           date: today
                       });
-                      
-                      console.log(`✅ Auto-News: Published "${article.title}". Next run in 2h.`);
-                  } else {
-                      console.log("⚠️ Auto-News: No new articles generated.");
                   }
+              });
 
-                  // UNLOCK
-                  setAutomationStatus(prev => ({ ...prev, isGenerating: false }));
+              if (shouldRun) {
+                  // LOCK LOCAL
+                  isGeneratingRef.current = true;
+                  sessionStorage.setItem('generating_news', 'true');
+                  setAutomationStatus(prev => ({ ...prev, isGenerating: true }));
+                  console.log("⚡ Auto-News Triggered via Transaction");
+
+                  // Generate Content
+                  const existingTitles = news.map(n => n.title);
+                  const newArticles = await generateCinemaNews(existingTitles);
+
+                  if (newArticles.length > 0) {
+                      const article = newArticles[0];
+                      let imageUrl = '';
+                      
+                      // Image Search Logic
+                      if (tmdbToken) {
+                          // Try search queries in order: Specific -> Title
+                          const queriesToTry = [article.searchQuery, article.title].filter(q => q);
+                          
+                          for (const query of queriesToTry) {
+                              if (imageUrl) break;
+                              try {
+                                  const searchRes = await searchMoviesTMDB(query, tmdbToken);
+                                  const bestMovie = searchRes.find(m => m.backdrop_path) || searchRes.find(m => m.poster_path);
+                                  if (bestMovie) {
+                                      imageUrl = getImageUrl(bestMovie.backdrop_path || bestMovie.poster_path, 'original');
+                                  } else {
+                                      const personRes = await searchPersonTMDB(query, tmdbToken);
+                                      const bestPerson = personRes.find(p => p.profile_path);
+                                      if (bestPerson) imageUrl = getImageUrl(bestPerson.profile_path, 'original');
+                                  }
+                              } catch (e) { console.warn("Image search err:", e); }
+                          }
+                      }
+
+                      // Fallback AI Image
+                      if (!imageUrl && article.visualPrompt) {
+                          imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
+                      }
+
+                      // Double check duplicate title before adding
+                      const freshNewsSnap = await getDocs(query(collection(db, 'news'), where('title', '==', article.title)));
+                      if (freshNewsSnap.empty) {
+                          await addDoc(collection(db, 'news'), {
+                              title: article.title,
+                              content: article.content,
+                              type: 'general',
+                              imageUrl: imageUrl,
+                              timestamp: Date.now()
+                          });
+                          console.log(`✅ Auto-News Published: ${article.title}`);
+                      }
+                  }
               }
 
           } catch (e) {
               console.error("Automation Engine Error:", e);
+          } finally {
+              // UNLOCK
+              isGeneratingRef.current = false;
+              sessionStorage.removeItem('generating_news');
               setAutomationStatus(prev => ({ ...prev, isGenerating: false }));
           }
       };
 
-      // Run check immediately on mount, then every 60 seconds
       checkNewsAutomation();
       const interval = setInterval(checkNewsAutomation, 60000); 
-
       return () => clearInterval(interval);
-  }, [user?.isAdmin, user?.id, tmdbToken, news.length]); // Dependencies to ensure fresh data
+  }, [user?.isAdmin, user?.id, tmdbToken, news.length]);
 
   // Firebase Listeners
   useEffect(() => {
@@ -212,7 +216,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (userSnap.exists()) {
                   const userData = { id: userSnap.id, ...userSnap.data() } as User;
                   setUser(userData);
-                  // Update Last Seen immediately on load
                   updateDoc(userRef, { lastSeen: Date.now() });
               }
           } else {
@@ -222,14 +225,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return () => unsubscribe();
   }, []);
 
-  // --- HEARTBEAT FOR ONLINE STATUS ---
   useEffect(() => {
       if (!user?.id) return;
       
       const interval = setInterval(() => {
-          // Update lastSeen every 2 minutes to stay "Online"
           updateDoc(doc(db, 'users', user.id), { lastSeen: Date.now() });
-      }, 2 * 60 * 1000); // 2 minutes
+      }, 2 * 60 * 1000);
 
       return () => clearInterval(interval);
   }, [user?.id]);
@@ -241,7 +242,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   }, [user?.id]);
 
-  // CORE DATA LISTENERS
   useEffect(() => {
       const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
           setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
@@ -297,7 +297,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   }, [user?.id]);
 
-  // Auth Methods
   const login = async (email: string, pass: string) => {
       try {
           await signInWithEmailAndPassword(auth, email, pass);
@@ -359,7 +358,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- MESSAGING SYSTEM ---
   const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
-      // Build clean object to avoid "Unsupported field value: undefined"
       const messageData: any = {
           title, 
           body, 
@@ -368,8 +366,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           read: false
       };
       
-      if (actionMovieId) messageData.actionMovieId = actionMovieId;
-      if (actionEventId) messageData.actionEventId = actionEventId;
+      // Prevent undefined values from crashing Firestore addDoc
+      if (actionMovieId && typeof actionMovieId === 'string') messageData.actionMovieId = actionMovieId;
+      if (actionEventId && typeof actionEventId === 'string') messageData.actionEventId = actionEventId;
 
       try {
           await addDoc(collection(db, 'users', userId, 'mailbox'), messageData);
@@ -381,63 +380,50 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const markMessageRead = async (msgId: string) => {
       if(!user) return;
       try {
-          const path = `users/${user.id}/mailbox/${msgId}`;
-          await updateDoc(doc(db, path), { read: true });
-      } catch(e) {
-          console.warn("Could not mark message as read (might be deleted):", e);
-      }
+          await updateDoc(doc(db, `users/${user.id}/mailbox/${msgId}`), { read: true });
+      } catch(e) { console.warn(e); }
   }
 
   const markAllMessagesRead = async () => {
       if(!user || mailbox.length === 0) return;
-      
       const batch = writeBatch(db);
       let count = 0;
-      
       mailbox.forEach(msg => {
           if (!msg.read) {
-              const path = `users/${user.id}/mailbox/${msg.id}`;
-              const ref = doc(db, path);
+              const ref = doc(db, `users/${user.id}/mailbox/${msg.id}`);
               batch.update(ref, { read: true });
               count++;
           }
       });
-
-      if (count > 0) {
-          await batch.commit();
-      }
+      if (count > 0) await batch.commit();
   };
 
   const deleteMessage = async (msgId: string) => {
       if(!user) throw new Error("User not authenticated");
       try {
-          const path = `users/${user.id}/mailbox/${msgId}`;
-          await deleteDoc(doc(db, path));
+          await deleteDoc(doc(db, `users/${user.id}/mailbox/${msgId}`));
           return true;
-      } catch(e) {
-          console.error("Could not delete message:", e);
-          throw e;
-      }
+      } catch(e) { console.error(e); throw e; }
   }
 
   // --- GAMIFICATION & MISSIONS ---
-  
   const checkMissions = async (userId: string) => {
       const userRef = doc(db, 'users', userId);
-      // Fetch latest snapshot to avoid working with stale data
+      
+      // FORCE DB FETCH to prevent XP drift
       let currentUserData: User | null = null;
-      if (userId === user?.id) {
-          currentUserData = user;
-      } else {
+      try {
           const userSnap = await getDoc(userRef);
           if (userSnap.exists()) {
               currentUserData = { id: userSnap.id, ...userSnap.data() } as User;
           }
+      } catch (e) {
+          console.error("Failed to fetch user data for missions:", e);
+          return;
       }
 
       if (!currentUserData) return;
 
-      // Stats Calculation
       const myRatings = userRatings.filter(r => r.userId === userId);
       const ratingsCount = myRatings.length;
       const reviewsCount = myRatings.filter(r => r.comment && r.comment.length > 0).length;
@@ -465,22 +451,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (newMissions.length > 0) {
-          // Re-calculate Total XP based on ALL completed missions + new ones to ensure consistency
-          const allCompleted = [...(currentUserData.completedMissions || []), ...newMissions];
-          const uniqueCompleted = Array.from(new Set(allCompleted));
-          
-          let recalculatedXP = 0;
-          uniqueCompleted.forEach(missionId => {
-              const m = MISSIONS.find(def => def.id === missionId);
-              if (m) recalculatedXP += m.xpReward;
-          });
-          
-          // Note: If you have XP sources other than missions (like Trivia), you should add them here.
-          // For now, let's assume trivia adds to a separate 'bonusXP' field or we trust the additive method 
-          // IF we are sure trivia calls updateDoc correctly.
-          // To be safe and fix the user issue, let's trust the additive for now BUT make sure we write it.
-          // The issue described (170 vs 180) implies simple addition happened locally but DB wasn't updated.
-          
           const newXP = (currentUserData.xp || 0) + xpGainedNow;
           const newLevel = Math.floor(newXP / 100) + 1;
 
@@ -492,15 +462,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           if (userId === user?.id) {
               setNotification({ type: 'level', message: `¡+${xpGainedNow} XP! Nueva misión completada.` });
-              // Force refresh local state to match DB
-              refreshUser();
+              // Force refresh local state immediately
+              await refreshUser();
           } else {
               sendSystemMessage(userId, "¡Misión Cumplida!", `Has completado ${newMissions.length} misiones y ganado ${xpGainedNow} XP.`, 'reward');
           }
       }
   };
 
-  // Data Methods
   const addMovie = async (movie: Movie) => {
       if (!movie.id) return;
       await setDoc(doc(db, 'movies', movie.id), movie);
@@ -511,10 +480,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
           const q = query(collection(db, 'ratings'), where('movieId', '==', movieId));
           const querySnapshot = await getDocs(q);
-          
           let totalSum = 0;
           let count = 0;
-          
           querySnapshot.forEach((doc) => {
               const r = doc.data();
               if (typeof r.rating === 'number' && !isNaN(r.rating)) {
@@ -522,17 +489,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   count++;
               }
           });
-
           const newAverage = count > 0 ? totalSum / count : 0;
-
           await updateDoc(doc(db, 'movies', movieId), {
               rating: newAverage,
               totalVotes: count
           });
-          
-      } catch (error) {
-          console.error("Error recalculating movie stats:", error);
-      }
+      } catch (error) { console.error("Error recalculating movie stats:", error); }
   };
 
   const rateMovie = async (movieId: string, detailed: any, comment: string, spoiler?: string) => {
@@ -546,16 +508,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           spoiler,
           timestamp: Date.now()
       };
-      
       await setDoc(doc(db, 'ratings', `${user.id}_${movieId}`), ratingData);
-      
       if (!user.watchedMovies.includes(movieId)) {
           await updateDoc(doc(db, 'users', user.id), {
               watchedMovies: arrayUnion(movieId),
               watchlist: arrayRemove(movieId)
           });
       }
-
       await recalculateMovieRating(movieId);
       checkMissions(user.id);
   };
@@ -585,32 +544,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const userLikes = rating.likes || [];
       const userDislikes = rating.dislikes || [];
-      
       let updates = {};
 
       if (voteType === 'like') {
-          if (userLikes.includes(user.id)) {
-              updates = { likes: arrayRemove(user.id) };
-          } else {
-              updates = { likes: arrayUnion(user.id), dislikes: arrayRemove(user.id) };
-          }
+          if (userLikes.includes(user.id)) updates = { likes: arrayRemove(user.id) };
+          else updates = { likes: arrayUnion(user.id), dislikes: arrayRemove(user.id) };
       } else {
-          if (userDislikes.includes(user.id)) {
-              updates = { dislikes: arrayRemove(user.id) };
-          } else {
-              updates = { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) };
-          }
+          if (userDislikes.includes(user.id)) updates = { dislikes: arrayRemove(user.id) };
+          else updates = { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) };
       }
       await updateDoc(doc(db, 'ratings', ratingId), updates);
       
-      // Trigger missions for BOTH users after a short delay to allow DB propagation
       setTimeout(() => {
-          checkMissions(user.id); // For "Likes Given" mission
-          checkMissions(targetUserId); // For "Likes Received" mission (Prestige)
+          checkMissions(user.id);
+          checkMissions(targetUserId);
       }, 1500);
   };
 
-  // Admin Methods
   const approveUser = (uid: string) => updateDoc(doc(db, 'users', uid), { status: 'active' });
   const rejectUser = (uid: string, banTime?: number) => {
       const update: any = { status: 'rejected' };
@@ -623,13 +573,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (u) updateDoc(doc(db, 'users', uid), { isAdmin: !u.isAdmin });
   };
   
-  // Persist Token to DB
   const setTmdbToken = async (token: string) => {
       setTmdbTokenState(token);
       await setDoc(doc(db, 'config', 'general'), { tmdbToken: token }, { merge: true });
   };
 
-  // News & Feedback
   const publishNews = (title: string, content: string, type: string, imageUrl?: string) => {
       addDoc(collection(db, 'news'), { title, content, type, imageUrl, timestamp: Date.now() });
   };
@@ -648,7 +596,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
   
   const resetAutomation = () => {
-      // Force reset local state and also update DB to allow immediate run
       setAutomationStatus({ dailyCount: 0, isGenerating: false, lastRun: 0, nextRun: 0 });
       setDoc(doc(db, 'config', 'news_automation'), { 
           dailyCount: 0, 
@@ -660,7 +607,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const auditQuality = async () => 0;
 
-  // Events
   const createEvent = async (data: any) => {
       await addDoc(collection(db, 'events'), { ...data, phase: 'voting', startDate: Date.now(), votingDeadline: Date.now() + 86400000 * 3, viewingDeadline: Date.now() + 86400000 * 7 });
   }
@@ -704,37 +650,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (preference) {
               newPrefs[user.id] = preference;
               if (!hasCommitted) {
-                  await updateDoc(doc(db, 'events', eventId), {
-                      [field]: arrayUnion(user.id),
-                      viewingPreferences: newPrefs
-                  });
+                  await updateDoc(doc(db, 'events', eventId), { [field]: arrayUnion(user.id), viewingPreferences: newPrefs });
               } else {
-                  await updateDoc(doc(db, 'events', eventId), {
-                      viewingPreferences: newPrefs
-                  });
+                  await updateDoc(doc(db, 'events', eventId), { viewingPreferences: newPrefs });
               }
-
               if (preference.group) {
-                  const interestedUsers = Object.entries(newPrefs)
-                      .filter(([uid, pref]) => uid !== user.id && (pref as any).group)
-                      .map(([uid]) => uid);
-                  
+                  const interestedUsers = Object.entries(newPrefs).filter(([uid, pref]) => uid !== user.id && (pref as any).group).map(([uid]) => uid);
                   if (interestedUsers.length > 0) {
-                      const allGroupies = [...interestedUsers, user.id];
-                      allGroupies.forEach(uid => {
+                      [...interestedUsers, user.id].forEach(uid => {
                           sendSystemMessage(uid, "¡Hay Quórum!", "¡Tienes compañeros para ver la peli! Entra al evento para coordinar lugar y hora.", "info", undefined, eventId);
                       });
                   }
               }
           } else {
-              await updateDoc(doc(db, 'events', eventId), {
-                  [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id)
-              });
+              await updateDoc(doc(db, 'events', eventId), { [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id) });
           }
       } else {
-          await updateDoc(doc(db, 'events', eventId), {
-              [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id)
-          });
+          await updateDoc(doc(db, 'events', eventId), { [field]: hasCommitted ? arrayRemove(user.id) : arrayUnion(user.id) });
       }
 
       if (!hasCommitted) {
@@ -755,49 +687,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   let newMovie: Movie;
                   if (details) {
                       newMovie = {
-                          id: movieId,
-                          tmdbId: details.id,
-                          title: details.title,
-                          year: parseInt(details.release_date?.split('-')[0]) || new Date().getFullYear(),
-                          director: details.credits?.crew?.find(c => c.job === 'Director')?.name || 'Unknown',
-                          genre: details.genres?.map(g => g.name) || [],
-                          posterUrl: getImageUrl(details.poster_path),
-                          backdropUrl: getImageUrl(details.backdrop_path, 'original'),
-                          description: details.overview,
-                          cast: details.credits?.cast?.slice(0, 5).map(c => c.name) || [],
-                          rating: 0,
-                          totalVotes: 0
+                          id: movieId, tmdbId: details.id, title: details.title, year: parseInt(details.release_date?.split('-')[0]) || new Date().getFullYear(),
+                          director: details.credits?.crew?.find(c => c.job === 'Director')?.name || 'Unknown', genre: details.genres?.map(g => g.name) || [],
+                          posterUrl: getImageUrl(details.poster_path), backdropUrl: getImageUrl(details.backdrop_path, 'original'), description: details.overview,
+                          cast: details.credits?.cast?.slice(0, 5).map(c => c.name) || [], rating: 0, totalVotes: 0
                       };
                   } else {
                       const candidate = activeEvent.candidates.find(c => c.tmdbId === tmdbId);
                       if (!candidate) throw new Error("Candidate data missing"); 
                       newMovie = {
-                          id: movieId,
-                          tmdbId: candidate.tmdbId,
-                          title: candidate.title,
-                          year: candidate.year,
-                          director: 'Ver detalles',
-                          genre: [],
-                          posterUrl: candidate.posterUrl,
-                          backdropUrl: activeEvent.backdropUrl || candidate.posterUrl,
-                          description: candidate.description,
-                          cast: [],
-                          rating: 0,
-                          totalVotes: 0
+                          id: movieId, tmdbId: candidate.tmdbId, title: candidate.title, year: candidate.year,
+                          director: 'Ver detalles', genre: [], posterUrl: candidate.posterUrl, backdropUrl: activeEvent.backdropUrl || candidate.posterUrl,
+                          description: candidate.description, cast: [], rating: 0, totalVotes: 0
                       };
                   }
                   await addMovie(newMovie);
-              } catch (e) {
-                  console.error("Error ensuring movie exists for watchlist:", e);
-                  return;
-              }
+              } catch (e) { console.error("Error ensuring movie exists for watchlist:", e); return; }
           }
 
           if (movieId) {
               const userRef = doc(db, 'users', user.id);
-              if (hasCommitted && !preference) {
-                  await updateDoc(userRef, { watchlist: arrayRemove(movieId) });
-              } else if (!hasCommitted) {
+              if (hasCommitted && !preference) await updateDoc(userRef, { watchlist: arrayRemove(movieId) });
+              else if (!hasCommitted) {
                   if (!user.watchedMovies.includes(movieId)) {
                       await updateDoc(userRef, { watchlist: arrayUnion(movieId) });
                       await updateDoc(userRef, { 'gamificationStats.watchlist': true });
@@ -810,22 +721,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const proposeMeetupLocation = async (eventId: string, location: { name: string, address: string, uri: string }) => {
       if (!user) return;
       const meetupLoc = {
-          id: `loc_${Date.now()}`,
-          name: location.name,
-          address: location.address,
-          mapUri: location.uri,
-          proposedBy: user.id,
-          votes: [user.id]
+          id: `loc_${Date.now()}`, name: location.name, address: location.address, mapUri: location.uri, proposedBy: user.id, votes: [user.id]
       };
-      
       const eventRef = doc(db, 'events', eventId);
       const eventSnap = await getDoc(eventRef);
       if (!eventSnap.exists()) return;
       const currentLocs = eventSnap.data().meetupProposal?.locations || [];
-      
-      await updateDoc(eventRef, {
-          'meetupProposal.locations': [...currentLocs, meetupLoc]
-      });
+      await updateDoc(eventRef, { 'meetupProposal.locations': [...currentLocs, meetupLoc] });
   };
 
   const voteMeetupLocation = async (eventId: string, locationId: string) => {
@@ -838,18 +740,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const newLocs = currentLocs.map((loc: any) => {
           if (loc.id === locationId) {
               const votes = loc.votes || [];
-              if (votes.includes(user.id)) {
-                  return { ...loc, votes: votes.filter((uid: string) => uid !== user.id) };
-              } else {
-                  return { ...loc, votes: [...votes, user.id] };
-              }
+              return votes.includes(user.id) ? { ...loc, votes: votes.filter((uid: string) => uid !== user.id) } : { ...loc, votes: [...votes, user.id] };
           }
           return loc;
       });
-
-      await updateDoc(eventRef, {
-          'meetupProposal.locations': newLocs
-      });
+      await updateDoc(eventRef, { 'meetupProposal.locations': newLocs });
   };
 
   const toggleTimeVote = async (eventId: string, timeKey: string) => {
@@ -857,9 +752,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const currentVotes = activeEvent.timeVotes?.[timeKey] || [];
       const hasVoted = currentVotes.includes(user.id);
       const newVotes = hasVoted ? currentVotes.filter(uid => uid !== user.id) : [...currentVotes, user.id];
-      await updateDoc(doc(db, 'events', eventId), {
-          [`timeVotes.${timeKey}`]: newVotes
-      });
+      await updateDoc(doc(db, 'events', eventId), { [`timeVotes.${timeKey}`]: newVotes });
   };
 
   const sendEventMessage = async (eventId: string, text: string, role: 'user'|'moderator'|'system' = 'user', audioBase64?: string) => {
@@ -867,10 +760,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           userId: user?.id || 'system',
           userName: role === 'moderator' ? 'Cine Mensa IA' : user?.name || 'Sistema',
           userAvatar: role === 'moderator' ? 'https://ui-avatars.com/api/?name=AI&background=d4af37&color=000' : user?.avatarUrl || '',
-          text,
-          role,
-          audioBase64,
-          timestamp: Date.now()
+          text, role, audioBase64, timestamp: Date.now()
       };
       await addDoc(collection(db, `events/${eventId}/messages`), msg);
       if (role === 'user' && user) {
@@ -882,38 +772,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const raiseHand = async (eventId: string) => {
       if (!user) return;
-      await updateDoc(doc(db, 'events', eventId), {
-          speakerQueue: arrayUnion(user.id)
-      });
+      await updateDoc(doc(db, 'events', eventId), { speakerQueue: arrayUnion(user.id) });
   };
 
   const grantTurn = async (eventId: string, userId: string) => {
-      await updateDoc(doc(db, 'events', eventId), {
-          currentSpeakerId: userId,
-          speakerQueue: arrayRemove(userId)
-      });
+      await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: userId, speakerQueue: arrayRemove(userId) });
   };
 
   const releaseTurn = async (eventId: string) => {
-      await updateDoc(doc(db, 'events', eventId), {
-          currentSpeakerId: null
-      });
+      await updateDoc(doc(db, 'events', eventId), { currentSpeakerId: null });
   };
 
-  const getEpisodeCount = async () => {
-      return 5;
-  };
+  const getEpisodeCount = async () => 5;
 
-  // Live Session
   const startLiveSession = async (mode: string) => {
-      if (!process.env.API_KEY) {
-          alert("API Key missing");
-          return;
-      }
+      if (!process.env.API_KEY) { alert("API Key missing"); return; }
       setLiveSession(prev => ({ ...prev, isConnected: true, status: 'Conectando...' }));
-      setTimeout(() => {
-          setLiveSession(prev => ({ ...prev, status: 'En línea' }));
-      }, 1000);
+      setTimeout(() => { setLiveSession(prev => ({ ...prev, status: 'En línea' })); }, 1000);
   };
 
   const stopLiveSession = () => {
@@ -925,34 +800,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return Math.max(0, 120 - user.voiceUsageSeconds);
   };
 
-  // Private Chat
   const startPrivateChat = async (targetUserId: string) => {
       if (!user) return;
       const targetUser = allUsers.find(u => u.id === targetUserId);
       if (!targetUser) return;
-
       const sessionId = [user.id, targetUserId].sort().join('_');
       const session: PrivateChatSession = {
-          id: sessionId,
-          creatorId: user.id,
-          targetId: targetUserId,
-          creatorName: user.name,
-          targetName: targetUser.name,
-          isActive: true,
-          createdAt: Date.now()
+          id: sessionId, creatorId: user.id, targetId: targetUserId, creatorName: user.name, targetName: targetUser.name, isActive: true, createdAt: Date.now()
       };
       setActivePrivateChat({ session, messages: [] });
   };
 
   const sendPrivateMessage = async (text: string) => {
       if (!activePrivateChat || !user) return;
-      const msg: PrivateChatMessage = {
-          id: Date.now().toString(),
-          senderId: user.id,
-          senderName: user.name,
-          text,
-          timestamp: Date.now()
-      };
+      const msg: PrivateChatMessage = { id: Date.now().toString(), senderId: user.id, senderName: user.name, text, timestamp: Date.now() };
       setActivePrivateChat(prev => prev ? { ...prev, messages: [...prev.messages, msg] } : null);
   };
 
@@ -960,33 +821,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const leavePrivateChat = () => setActivePrivateChat(null);
   const setPrivateChatTyping = (isTyping: boolean) => {};
 
-  // Trivia
   const inviteToTrivia = (targetUserId: string) => {
       if (!user) return;
       const targetUser = allUsers.find(u => u.id === targetUserId);
       if (!targetUser) return;
-
       const matchId = `match_${Date.now()}`;
       const newMatch: TriviaMatch = {
           id: matchId,
-          players: {
-              [user.id]: { id: user.id, name: user.name, avatarUrl: user.avatarUrl, score: 0, hasAnswered: false },
-              [targetUserId]: { id: targetUser.id, name: targetUser.name, avatarUrl: targetUser.avatarUrl, score: 0, hasAnswered: false }
-          },
-          currentQuestion: null,
-          round: 0,
-          status: 'waiting',
-          createdAt: Date.now()
+          players: { [user.id]: { id: user.id, name: user.name, avatarUrl: user.avatarUrl, score: 0, hasAnswered: false }, [targetUserId]: { id: targetUser.id, name: targetUser.name, avatarUrl: targetUser.avatarUrl, score: 0, hasAnswered: false } },
+          currentQuestion: null, round: 0, status: 'waiting', createdAt: Date.now()
       };
-      
       setActiveTriviaMatch(newMatch);
       sendSystemMessage(targetUserId, "Desafío de Trivial", `${user.name} te ha invitado a un duelo de cine.`, 'info');
   };
 
-  const updateTriviaMatchState = (newState: Partial<TriviaMatch>) => {
-      setActiveTriviaMatch(prev => prev ? { ...prev, ...newState } : null);
-  }
-
+  const updateTriviaMatchState = (newState: Partial<TriviaMatch>) => setActiveTriviaMatch(prev => prev ? { ...prev, ...newState } : null);
+  
   const handleTriviaWin = async (winnerId: string) => {
       if (winnerId === user?.id) {
           const userRef = doc(db, 'users', user.id);
@@ -1006,7 +856,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const endTriviaMatchLocal = () => setActiveTriviaMatch(null);
 
-  // User Profile
   const updateUserProfile = async (name: string, avatarUrl: string) => {
       if (!user) return;
       await updateDoc(doc(db, 'users', user.id), { name, avatarUrl });
@@ -1023,29 +872,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const spendCredits = async (amount: number, itemId: string) => {
       if (!user || user.credits < amount) return false;
-      await updateDoc(doc(db, 'users', user.id), {
-          credits: increment(-amount),
-          inventory: arrayUnion(itemId)
-      });
+      await updateDoc(doc(db, 'users', user.id), { credits: increment(-amount), inventory: arrayUnion(itemId) });
       setNotification({ type: 'shop', message: '¡Compra realizada con éxito!' });
       return true;
   };
 
   const toggleInventoryItem = async (itemId: string) => {
       if (!user) return;
-      if (user.inventory?.includes(itemId)) {
-          await updateDoc(doc(db, 'users', user.id), { inventory: arrayRemove(itemId) });
-      } else {
-          await updateDoc(doc(db, 'users', user.id), { inventory: arrayUnion(itemId) });
-      }
+      if (user.inventory?.includes(itemId)) await updateDoc(doc(db, 'users', user.id), { inventory: arrayRemove(itemId) });
+      else await updateDoc(doc(db, 'users', user.id), { inventory: arrayUnion(itemId) });
   }
 
   const completeLevelUpChallenge = async (level: number, reward: number) => {
       if (!user) return;
-      await updateDoc(doc(db, 'users', user.id), {
-          credits: increment(reward),
-          level: Math.max(user.level, level)
-      });
+      await updateDoc(doc(db, 'users', user.id), { credits: increment(reward), level: Math.max(user.level, level) });
       setNotification({ type: 'level', message: `¡Nivel ${level} Alcanzado! +${reward} Créditos` });
   };
 
@@ -1057,10 +897,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     currentView, selectedMovieId, selectedPersonId, initialProfileTab,
     tmdbToken, notification, milestoneEvent, automationStatus,
     liveSession, topCriticId, activePrivateChat,
-    // Trivia State & Functions
     activeTriviaMatch, inviteToTrivia, updateTriviaMatchState, endTriviaMatchLocal, handleTriviaWin, saveTriviaHighScore,
-    
-    setView, login, register, logout, resetPassword, refreshUser, // Export refreshUser
+    setView, login, register, logout, resetPassword, refreshUser,
     addMovie, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote,
     approveUser, rejectUser, deleteUserAccount, toggleUserAdmin, updateUserProfile,
     setTmdbToken, sendSystemMessage, markMessageRead, markAllMessagesRead, deleteMessage,
