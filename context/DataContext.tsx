@@ -14,7 +14,7 @@ import {
   EventPhase, ChatMessage, MailboxMessage, LiveSessionState, PrivateChatSession,
   PrivateChatMessage, TriviaMatch, TriviaQuestion, EventCandidate 
 } from '../types';
-import { STARTER_AVATARS } from '../constants';
+import { STARTER_AVATARS, MISSIONS, XP_TABLE } from '../constants';
 import { getMovieDetailsTMDB, getImageUrl, searchMoviesTMDB, searchPersonTMDB } from '../services/tmdbService';
 import { generateCinemaNews } from '../services/geminiService';
 
@@ -343,21 +343,172 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
+  // --- MANUAL REFRESH USER (FORCE DB SYNC) ---
+  const refreshUser = async () => {
+      if (!user?.id) return;
+      try {
+          const userRef = doc(db, 'users', user.id);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+              setUser({ id: userSnap.id, ...userSnap.data() } as User);
+          }
+      } catch(e) {
+          console.error("Error refreshing user data:", e);
+      }
+  };
+
+  // --- MESSAGING SYSTEM ---
+  const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
+      // Build clean object to avoid "Unsupported field value: undefined"
+      const messageData: any = {
+          title, 
+          body, 
+          type, 
+          timestamp: Date.now(), 
+          read: false
+      };
+      
+      if (actionMovieId) messageData.actionMovieId = actionMovieId;
+      if (actionEventId) messageData.actionEventId = actionEventId;
+
+      try {
+          await addDoc(collection(db, 'users', userId, 'mailbox'), messageData);
+      } catch (e) {
+          console.error("Failed to send system message:", e);
+      }
+  };
+
+  const markMessageRead = async (msgId: string) => {
+      if(!user) return;
+      try {
+          const path = `users/${user.id}/mailbox/${msgId}`;
+          await updateDoc(doc(db, path), { read: true });
+      } catch(e) {
+          console.warn("Could not mark message as read (might be deleted):", e);
+      }
+  }
+
+  const markAllMessagesRead = async () => {
+      if(!user || mailbox.length === 0) return;
+      
+      const batch = writeBatch(db);
+      let count = 0;
+      
+      mailbox.forEach(msg => {
+          if (!msg.read) {
+              const path = `users/${user.id}/mailbox/${msg.id}`;
+              const ref = doc(db, path);
+              batch.update(ref, { read: true });
+              count++;
+          }
+      });
+
+      if (count > 0) {
+          await batch.commit();
+      }
+  };
+
+  const deleteMessage = async (msgId: string) => {
+      if(!user) throw new Error("User not authenticated");
+      try {
+          const path = `users/${user.id}/mailbox/${msgId}`;
+          await deleteDoc(doc(db, path));
+          return true;
+      } catch(e) {
+          console.error("Could not delete message:", e);
+          throw e;
+      }
+  }
+
+  // --- GAMIFICATION & MISSIONS ---
+  
+  const checkMissions = async (userId: string) => {
+      const userRef = doc(db, 'users', userId);
+      // Fetch latest snapshot to avoid working with stale data
+      let currentUserData: User | null = null;
+      if (userId === user?.id) {
+          currentUserData = user;
+      } else {
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+              currentUserData = { id: userSnap.id, ...userSnap.data() } as User;
+          }
+      }
+
+      if (!currentUserData) return;
+
+      // Stats Calculation
+      const myRatings = userRatings.filter(r => r.userId === userId);
+      const ratingsCount = myRatings.length;
+      const reviewsCount = myRatings.filter(r => r.comment && r.comment.length > 0).length;
+      const likesReceived = myRatings.reduce((acc, r) => acc + (r.likes?.length || 0), 0);
+      
+      let likesGiven = 0;
+      userRatings.forEach(r => {
+          if (r.likes?.includes(userId)) likesGiven++;
+          if (r.dislikes?.includes(userId)) likesGiven++;
+      });
+
+      const feedbackCount = feedbackList.filter(f => f.userId === userId).length;
+      const stats = { ratingsCount, reviewsCount, likesReceived, likesGiven, feedbackCount };
+
+      let xpGainedNow = 0;
+      const newMissions: string[] = [];
+
+      MISSIONS.forEach(mission => {
+          if (!currentUserData!.completedMissions?.includes(mission.id)) {
+              if (mission.condition(currentUserData!, stats)) {
+                  newMissions.push(mission.id);
+                  xpGainedNow += mission.xpReward;
+              }
+          }
+      });
+
+      if (newMissions.length > 0) {
+          // Re-calculate Total XP based on ALL completed missions + new ones to ensure consistency
+          const allCompleted = [...(currentUserData.completedMissions || []), ...newMissions];
+          const uniqueCompleted = Array.from(new Set(allCompleted));
+          
+          let recalculatedXP = 0;
+          uniqueCompleted.forEach(missionId => {
+              const m = MISSIONS.find(def => def.id === missionId);
+              if (m) recalculatedXP += m.xpReward;
+          });
+          
+          // Note: If you have XP sources other than missions (like Trivia), you should add them here.
+          // For now, let's assume trivia adds to a separate 'bonusXP' field or we trust the additive method 
+          // IF we are sure trivia calls updateDoc correctly.
+          // To be safe and fix the user issue, let's trust the additive for now BUT make sure we write it.
+          // The issue described (170 vs 180) implies simple addition happened locally but DB wasn't updated.
+          
+          const newXP = (currentUserData.xp || 0) + xpGainedNow;
+          const newLevel = Math.floor(newXP / 100) + 1;
+
+          await updateDoc(userRef, {
+              completedMissions: arrayUnion(...newMissions),
+              xp: newXP,
+              level: newLevel
+          });
+
+          if (userId === user?.id) {
+              setNotification({ type: 'level', message: `¡+${xpGainedNow} XP! Nueva misión completada.` });
+              // Force refresh local state to match DB
+              refreshUser();
+          } else {
+              sendSystemMessage(userId, "¡Misión Cumplida!", `Has completado ${newMissions.length} misiones y ganado ${xpGainedNow} XP.`, 'reward');
+          }
+      }
+  };
+
   // Data Methods
   const addMovie = async (movie: Movie) => {
       if (!movie.id) return;
       await setDoc(doc(db, 'movies', movie.id), movie);
   };
 
-  const checkMissions = (userId: string) => { /* Placeholder */ };
-
-  // --- HELPER: Recalculate Movie Stats ---
   const recalculateMovieRating = async (movieId: string) => {
-      // FIX: Increase delay to ensure Firestore writes have propagated to indices/reads
       await new Promise(resolve => setTimeout(resolve, 1500));
-
       try {
-          // Fetch all ratings for this movie
           const q = query(collection(db, 'ratings'), where('movieId', '==', movieId));
           const querySnapshot = await getDocs(q);
           
@@ -374,7 +525,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           const newAverage = count > 0 ? totalSum / count : 0;
 
-          // Update Movie Document with new stats
           await updateDoc(doc(db, 'movies', movieId), {
               rating: newAverage,
               totalVotes: count
@@ -397,10 +547,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           timestamp: Date.now()
       };
       
-      // 1. Save or Update individual rating
       await setDoc(doc(db, 'ratings', `${user.id}_${movieId}`), ratingData);
       
-      // 2. Update User lists if needed
       if (!user.watchedMovies.includes(movieId)) {
           await updateDoc(doc(db, 'users', user.id), {
               watchedMovies: arrayUnion(movieId),
@@ -408,21 +556,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
       }
 
-      // 3. Trigger recalculation of global average
       await recalculateMovieRating(movieId);
-
       checkMissions(user.id);
   };
 
   const unwatchMovie = async (movieId: string) => {
       if (!user) return;
-      // 1. Delete rating
       await deleteDoc(doc(db, 'ratings', `${user.id}_${movieId}`));
-      // 2. Update user lists
       await updateDoc(doc(db, 'users', user.id), {
           watchedMovies: arrayRemove(movieId)
       });
-      // 3. Recalculate global average (will decrease count)
       await recalculateMovieRating(movieId);
   };
 
@@ -435,8 +578,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
-  const toggleReviewVote = (targetUserId: string, movieId: string, voteType: 'like'|'dislike') => {
-      // Placeholder logic for likes
+  const toggleReviewVote = async (targetUserId: string, movieId: string, voteType: 'like'|'dislike') => {
       const ratingId = `${targetUserId}_${movieId}`;
       const rating = userRatings.find(r => r.movieId === movieId && r.userId === targetUserId);
       if (!rating || !user) return;
@@ -459,7 +601,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               updates = { dislikes: arrayUnion(user.id), likes: arrayRemove(user.id) };
           }
       }
-      updateDoc(doc(db, 'ratings', ratingId), updates);
+      await updateDoc(doc(db, 'ratings', ratingId), updates);
+      
+      // Trigger missions for BOTH users after a short delay to allow DB propagation
+      setTimeout(() => {
+          checkMissions(user.id); // For "Likes Given" mission
+          checkMissions(targetUserId); // For "Likes Received" mission (Prestige)
+      }, 1500);
   };
 
   // Admin Methods
@@ -480,66 +628,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setTmdbTokenState(token);
       await setDoc(doc(db, 'config', 'general'), { tmdbToken: token }, { merge: true });
   };
-  
-  // --- MESSAGING SYSTEM (REWRITTEN) ---
-  const sendSystemMessage = async (userId: string, title: string, body: string, type = 'info', actionMovieId?: string, actionEventId?: string) => {
-      // Firestore does not accept 'undefined' values. We omit them or pass null.
-      const messageData = {
-          title, 
-          body, 
-          type, 
-          timestamp: Date.now(), 
-          read: false,
-          ...(actionMovieId ? { actionMovieId } : {}),
-          ...(actionEventId ? { actionEventId } : {})
-      };
-      await addDoc(collection(db, 'users', userId, 'mailbox'), messageData);
-  };
-
-  const markMessageRead = async (msgId: string) => {
-      if(!user) return;
-      try {
-          const path = `users/${user.id}/mailbox/${msgId}`;
-          await updateDoc(doc(db, path), { read: true });
-      } catch(e) {
-          console.warn("Could not mark message as read (might be deleted):", e);
-      }
-  }
-
-  const markAllMessagesRead = async () => {
-      if(!user || mailbox.length === 0) return;
-      
-      const batch = writeBatch(db);
-      let count = 0;
-      
-      mailbox.forEach(msg => {
-          if (!msg.read) {
-              // Explicit path for robustness
-              const path = `users/${user.id}/mailbox/${msg.id}`;
-              const ref = doc(db, path);
-              batch.update(ref, { read: true });
-              count++;
-          }
-      });
-
-      if (count > 0) {
-          await batch.commit();
-      }
-  };
-
-  const deleteMessage = async (msgId: string) => {
-      if(!user) throw new Error("User not authenticated");
-      try {
-          // Explicit string path to ensure correct deletion and avoid undefined segment issues
-          const path = `users/${user.id}/mailbox/${msgId}`;
-          console.log("Deleting message at:", path);
-          await deleteDoc(doc(db, path));
-          return true;
-      } catch(e) {
-          console.error("Could not delete message:", e);
-          throw e;
-      }
-  }
 
   // News & Feedback
   const publishNews = (title: string, content: string, type: string, imageUrl?: string) => {
@@ -547,7 +635,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
   const deleteNews = (id: string) => deleteDoc(doc(db, 'news', id));
   const sendFeedback = (type: string, text: string) => {
-      if(user) addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() });
+      if(user) {
+          addDoc(collection(db, 'feedback'), { userId: user.id, userName: user.name, type, text, status: 'pending', timestamp: Date.now() });
+          checkMissions(user.id);
+      }
   };
   const resolveFeedback = (id: string) => updateDoc(doc(db, 'feedback', id), { status: 'solved' });
   const deleteFeedback = (id: string) => deleteDoc(doc(db, 'feedback', id));
@@ -969,7 +1060,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Trivia State & Functions
     activeTriviaMatch, inviteToTrivia, updateTriviaMatchState, endTriviaMatchLocal, handleTriviaWin, saveTriviaHighScore,
     
-    setView, login, register, logout, resetPassword,
+    setView, login, register, logout, resetPassword, refreshUser, // Export refreshUser
     addMovie, rateMovie, unwatchMovie, toggleWatchlist, toggleReviewVote,
     approveUser, rejectUser, deleteUserAccount, toggleUserAdmin, updateUserProfile,
     setTmdbToken, sendSystemMessage, markMessageRead, markAllMessagesRead, deleteMessage,

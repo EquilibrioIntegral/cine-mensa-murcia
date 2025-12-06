@@ -8,7 +8,7 @@ import { MISSIONS, RANKS, XP_TABLE } from '../constants';
 import { Mission } from '../types';
 
 const Profile: React.FC = () => {
-  const { user, userRatings, updateUserProfile, initialProfileTab, setInitialProfileTab } = useData();
+  const { user, userRatings, updateUserProfile, initialProfileTab, setInitialProfileTab, refreshUser } = useData();
   const [activeTab, setActiveTab] = useState<'profile' | 'career'>('profile');
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
@@ -29,6 +29,13 @@ const Profile: React.FC = () => {
       // Reset context so normal navigation works
       return () => setInitialProfileTab('profile');
   }, []); // Only on mount
+
+  // FORCE DB REFRESH ON CAREER TAB
+  useEffect(() => {
+      if (activeTab === 'career') {
+          refreshUser();
+      }
+  }, [activeTab]);
 
   if (!user) return null;
 
