@@ -23,7 +23,7 @@ import PrivateChatModal from './components/PrivateChatModal';
 import { ViewState } from './types';
 import { Clock, ShieldAlert, Ban, Timer } from 'lucide-react';
 
-const AppContent: React.FC = () => {
+const AppContent = () => {
   const { currentView, user, milestoneEvent, closeMilestoneModal, setView, setInitialProfileTab, logout } = useData();
 
   if (!user) {
@@ -163,7 +163,7 @@ const AppContent: React.FC = () => {
   );
 };
 
-const App: React.FC = () => {
+const App = () => {
   return (
     <DataProvider>
       <AppContent />
