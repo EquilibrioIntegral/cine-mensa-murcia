@@ -87,7 +87,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!user?.isAdmin) return;
 
       const checkNewsAutomation = async () => {
-          // Double lock: Ref + SessionStorage
+          // Double lock: Ref + SessionStorage to prevent multi-tab race
           if (isGeneratingRef.current || sessionStorage.getItem('generating_news') === 'true') return;
 
           try {
@@ -151,7 +151,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       const article = newArticles[0];
                       let imageUrl = '';
                       
-                      // Image Search Logic
+                      // Image Search Logic - Prioritize TMDB
                       if (tmdbToken) {
                           // Try search queries in order: Specific -> Title
                           const queriesToTry = [article.searchQuery, article.title].filter(q => q);
@@ -172,7 +172,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                           }
                       }
 
-                      // Fallback AI Image
+                      // Fallback AI Image if no TMDB image found
                       if (!imageUrl && article.visualPrompt) {
                           imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(article.visualPrompt)}?nologo=true&width=800&height=450&model=flux`;
                       }
@@ -366,9 +366,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           read: false
       };
       
-      // Prevent undefined values from crashing Firestore addDoc
-      if (actionMovieId && typeof actionMovieId === 'string') messageData.actionMovieId = actionMovieId;
-      if (actionEventId && typeof actionEventId === 'string') messageData.actionEventId = actionEventId;
+      // Explicitly check for truthy string values to avoid undefined error in Firestore
+      if (actionMovieId) messageData.actionMovieId = actionMovieId;
+      if (actionEventId) messageData.actionEventId = actionEventId;
 
       try {
           await addDoc(collection(db, 'users', userId, 'mailbox'), messageData);
@@ -410,7 +410,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const checkMissions = async (userId: string) => {
       const userRef = doc(db, 'users', userId);
       
-      // FORCE DB FETCH to prevent XP drift
+      // FORCE DB FETCH to prevent XP drift (e.g. 170 in DB vs 180 in UI)
       let currentUserData: User | null = null;
       try {
           const userSnap = await getDoc(userRef);
@@ -451,6 +451,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (newMissions.length > 0) {
+          // Calculate new XP based on FRESH server data
           const newXP = (currentUserData.xp || 0) + xpGainedNow;
           const newLevel = Math.floor(newXP / 100) + 1;
 
@@ -462,7 +463,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           if (userId === user?.id) {
               setNotification({ type: 'level', message: `¡+${xpGainedNow} XP! Nueva misión completada.` });
-              // Force refresh local state immediately
+              // Trigger a local refresh to update the UI instantly
               await refreshUser();
           } else {
               sendSystemMessage(userId, "¡Misión Cumplida!", `Has completado ${newMissions.length} misiones y ganado ${xpGainedNow} XP.`, 'reward');
