@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
-import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting, decideBestTime, searchPlacesWithMaps } from '../services/geminiService';
+import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting, decideBestTime } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv, Volume2, VolumeX, MapPin, Search, ExternalLink, ThumbsUp } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv, Volume2, VolumeX } from 'lucide-react';
 import { EventCandidate } from '../types';
 import MovieCard from '../components/MovieCard';
 import AIVisualizer from '../components/AIVisualizer';
@@ -47,7 +47,7 @@ const TIME_CATEGORIES = [
 ];
 
 const Events: React.FC = () => {
-  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, raiseHand, grantTurn, releaseTurn, proposeMeetupLocation, voteMeetupLocation } = useData();
+  const { user, activeEvent, movies, allUsers, userRatings, createEvent, closeEvent, tmdbToken, voteForCandidate, transitionEventPhase, sendEventMessage, eventMessages, toggleEventCommitment, toggleTimeVote, getEpisodeCount, raiseHand, grantTurn, releaseTurn } = useData();
   const [generating, setGenerating] = useState(false);
   const [closing, setClosing] = useState(false);
   const [startingDiscussion, setStartingDiscussion] = useState(false);
@@ -77,11 +77,6 @@ const Events: React.FC = () => {
   // Personalized Reasons State
   const [personalizedReasons, setPersonalizedReasons] = useState<Record<number, string>>({});
 
-  // Meetup Maps State
-  const [placeQuery, setPlaceQuery] = useState('');
-  const [searchingPlaces, setSearchingPlaces] = useState(false);
-  const [foundPlaces, setFoundPlaces] = useState<any[]>([]);
-
   // Auto-scroll chat
   useEffect(() => {
       if (chatContainerRef.current) {
@@ -96,8 +91,6 @@ const Events: React.FC = () => {
       setAdminDebatePreview(false);
       setAdminTimePreview(null);
       setExpandedTimeCat(null);
-      setFoundPlaces([]);
-      setPlaceQuery('');
   }, [activeEvent?.id]);
 
   // AUTO-PLAY AUDIO & TTS LOGIC
@@ -223,24 +216,6 @@ const Events: React.FC = () => {
       loadPersonalization();
   }, [activeEvent, user, userRatings, movies]);
 
-  const handleSearchPlaces = async () => {
-      if (!placeQuery.trim()) return;
-      setSearchingPlaces(true);
-      try {
-          const results = await searchPlacesWithMaps(placeQuery);
-          setFoundPlaces(results);
-      } catch (e) {
-          console.error(e);
-      } finally {
-          setSearchingPlaces(false);
-      }
-  };
-
-  const handleProposeLocation = async (place: any) => {
-      await proposeMeetupLocation(activeEvent.id, place);
-      setFoundPlaces([]);
-      setPlaceQuery('');
-  };
 
   const handleCreate = async () => {
       setGenerating(true);
@@ -338,18 +313,6 @@ const Events: React.FC = () => {
       setSimulatingTime(false);
   };
 
-  const handleCommitment = (type: 'solo' | 'group') => {
-      if (!user || !activeEvent) return;
-      
-      const currentPrefs = activeEvent.viewingPreferences?.[user.id] || { solo: false, group: false };
-      const newPrefs = {
-          solo: type === 'solo' ? !currentPrefs.solo : currentPrefs.solo,
-          group: type === 'group' ? !currentPrefs.group : currentPrefs.group
-      };
-      
-      toggleEventCommitment(activeEvent.id, 'view', undefined, newPrefs);
-  }
-
   if (!activeEvent) {
       return (
           <div className="container mx-auto px-4 py-20 flex flex-col items-center justify-center text-center">
@@ -366,10 +329,13 @@ const Events: React.FC = () => {
   }
 
   const myVote = activeEvent.candidates.find(c => c.votes.includes(user?.id || ''));
+  // Determine phase based on real state AND simulations
   const currentPhase = adminDebatePreview ? 'discussion' : (adminPreviewMode ? 'viewing' : activeEvent.phase);
   
   let winner: EventCandidate | undefined | null = null;
+  
   if (adminPreviewMode || adminDebatePreview) {
+      // In simulation, pick current winner
       if (activeEvent.candidates.length > 0) winner = activeEvent.candidates.reduce((prev, current) => (prev.votes.length > current.votes.length) ? prev : current);
   } else if (activeEvent.winnerTmdbId) {
       winner = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId);
@@ -378,11 +344,6 @@ const Events: React.FC = () => {
   const votingEndDate = new Date(activeEvent.votingDeadline).toLocaleDateString();
   const viewingEndDate = new Date(activeEvent.viewingDeadline).toLocaleDateString();
 
-  // Commitment & Group Logic
-  const myPreferences = activeEvent.viewingPreferences?.[user?.id || ''] || { solo: false, group: false };
-  const groupViewers = Object.entries(activeEvent.viewingPreferences || {}).filter(([uid, pref]) => (pref as any).group).map(([uid]) => uid);
-  const showMeetupCoordinator = myPreferences.group && groupViewers.length >= 2;
-
   return (
     <div className="min-h-screen bg-cine-dark pb-20 relative overflow-hidden flex flex-col">
         <div className="absolute inset-0 z-0">
@@ -390,6 +351,7 @@ const Events: React.FC = () => {
             <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-cine-dark/70 to-cine-dark"></div>
         </div>
         
+        {/* Simulation Banners */}
         {adminPreviewMode && !adminDebatePreview && <div className="fixed top-16 left-0 right-0 bg-blue-600/90 text-white text-center py-2 z-40 font-bold animate-pulse">👁️ MODO VISTA PREVIA: FASE PROYECCIÓN (Solo Admin)</div>}
         {adminDebatePreview && <div className="fixed top-16 left-0 right-0 bg-purple-600/90 text-white text-center py-2 z-40 font-bold animate-pulse">👁️ MODO VISTA PREVIA: CINEFORUM DEBATE (Solo Admin)</div>}
 
@@ -405,6 +367,7 @@ const Events: React.FC = () => {
                 <h1 className="text-4xl md:text-6xl font-black text-white mb-2 drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)] uppercase italic leading-none tracking-tighter">{activeEvent.themeTitle}</h1>
                 <p className="text-xl text-white max-w-3xl mx-auto italic font-serif mb-6 leading-relaxed drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">"{activeEvent.themeDescription}"</p>
                 
+                {/* Visual Header CANDIDATAS */}
                 {currentPhase === 'voting' && (
                     <div className="flex flex-col items-center mb-6">
                         <div className="h-1 w-20 bg-cine-gold mb-2"></div>
@@ -424,6 +387,7 @@ const Events: React.FC = () => {
 
             {currentPhase === 'voting' && (
                 <div className="max-w-6xl mx-auto animate-fade-in pb-10">
+                    {/* ... (Same Voting UI) ... */}
                     <div className="bg-black/40 backdrop-blur-md border-l-4 border-cine-gold p-6 rounded-r-xl mb-8 flex flex-col md:flex-row items-start gap-6 shadow-lg">
                         <div className="flex-grow">
                              <div className="flex items-center gap-2 text-cine-gold font-bold text-lg mb-2"><Sparkles size={20}/> Elección de la Comunidad</div>
@@ -492,6 +456,7 @@ const Events: React.FC = () => {
                 <div className="max-w-5xl mx-auto animate-fade-in flex-grow flex flex-col relative">
                     {adminPreviewMode && <div className="absolute top-0 right-0 z-50"><button onClick={() => setAdminPreviewMode(false)} className="bg-white text-black font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2"><Eye size={18}/> Salir de Vista Previa</button></div>}
 
+                    {/* ... (Same Viewing UI) ... */}
                     <div className="text-center mb-10">
                         <Trophy className="text-cine-gold mx-auto mb-4 animate-bounce" size={64} />
                         <h2 className="text-3xl font-bold text-white mb-2">¡TENEMOS GANADORA!</h2>
@@ -505,6 +470,7 @@ const Events: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Final Date Announcement */}
                     {(activeEvent.finalDebateDate || adminTimePreview) && (
                         <div className={`mb-10 relative overflow-hidden p-8 rounded-2xl border-4 text-center animate-fade-in shadow-[0_0_80px_rgba(0,0,0,0.8)] ${adminTimePreview?.chosenTime === 'CANCELLED' ? 'bg-black border-red-600' : 'bg-black border-cine-gold'}`}>
                             {adminTimePreview?.chosenTime === 'CANCELLED' ? (
@@ -538,105 +504,29 @@ const Events: React.FC = () => {
                         </div>
 
                         <div className="space-y-8 bg-black/40 p-6 rounded-2xl border border-gray-700 backdrop-blur-sm">
-                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Users className="text-cine-gold"/> Plan de Visualización</h3>
+                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Users className="text-cine-gold"/> Participación</h3>
                             
                             <div className="border-b border-gray-700 pb-6">
-                                <p className="text-gray-400 text-sm mb-4">¿Cómo vas a ver la película? Puedes marcar ambas opciones.</p>
-                                
-                                <div className="space-y-3">
-                                    <button 
-                                        onClick={() => handleCommitment('solo')}
-                                        className={`w-full py-3 px-4 rounded-lg font-bold flex items-center justify-between transition-all ${myPreferences.solo ? 'bg-green-900/40 text-green-400 border border-green-600' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
-                                    >
-                                        <span className="flex items-center gap-2"><Eye size={18}/> Ver por mi cuenta</span>
-                                        {myPreferences.solo && <Check size={18}/>}
-                                    </button>
-
-                                    <button 
-                                        onClick={() => handleCommitment('group')}
-                                        className={`w-full py-3 px-4 rounded-lg font-bold flex items-center justify-between transition-all ${myPreferences.group ? 'bg-blue-900/40 text-blue-400 border border-blue-600' : 'bg-gray-700 text-white hover:bg-gray-600'}`}
-                                    >
-                                        <span className="flex items-center gap-2"><Users size={18}/> Quedada Física (Grupo)</span>
-                                        {myPreferences.group && <Check size={18}/>}
-                                    </button>
+                                <div className="flex justify-between items-center mb-4"><h4 className="text-gray-300 font-bold">Espectadores</h4><span className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-400">{activeEvent.committedViewers?.length || 0}</span></div>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    {activeEvent.committedViewers?.map(uid => { const u = allUsers.find(user => user.id === uid); return u ? <img key={uid} src={u.avatarUrl} title={u.name} className="w-8 h-8 rounded-full border border-gray-600" /> : null; })}
                                 </div>
-                                
-                                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                                    <Users size={12}/> {groupViewers.length} interesados en quedada física.
-                                </div>
-                            </div>
-
-                            {showMeetupCoordinator && (
-                                <div className="animate-fade-in bg-blue-900/10 border border-blue-500/30 rounded-xl p-4">
-                                    <div className="flex items-center gap-2 mb-4 text-blue-400 font-bold border-b border-blue-500/20 pb-2">
-                                        <MapPin size={18}/> Zona de Quedada
-                                    </div>
-                                    
-                                    <p className="text-xs text-gray-300 mb-4">
-                                        ¡Hay quórum! Proponed un lugar y votad.
-                                    </p>
-
-                                    <div className="relative mb-4">
-                                        <div className="flex gap-2">
-                                            <input 
-                                                type="text" 
-                                                value={placeQuery}
-                                                onChange={(e) => setPlaceQuery(e.target.value)}
-                                                placeholder="Buscar lugar (Cine, Bar...)"
-                                                className="flex-grow bg-black/50 border border-blue-500/30 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
-                                            />
-                                            <button onClick={handleSearchPlaces} disabled={searchingPlaces} className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg disabled:opacity-50">
-                                                {searchingPlaces ? <Loader2 className="animate-spin" size={18}/> : <Search size={18}/>}
-                                            </button>
-                                        </div>
-                                        
-                                        {foundPlaces.length > 0 && (
-                                            <div className="absolute top-full left-0 w-full mt-2 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                                                {foundPlaces.map((place, idx) => (
-                                                    <div key={idx} className="p-3 border-b border-gray-800 last:border-0 hover:bg-white/5 flex justify-between items-center">
-                                                        <div className="flex-grow">
-                                                            <p className="font-bold text-white text-sm">{place.name}</p>
-                                                            <a href={place.uri} target="_blank" className="text-xs text-blue-400 hover:underline flex items-center gap-1"><ExternalLink size={10}/> Ver mapa</a>
-                                                        </div>
-                                                        <button onClick={() => handleProposeLocation(place)} className="bg-green-600 text-white text-xs font-bold px-3 py-1 rounded">Proponer</button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                                        {activeEvent.meetupProposal?.locations.map((loc) => {
-                                            const hasVoted = loc.votes.includes(user?.id || '');
-                                            return (
-                                                <div key={loc.id} className="bg-black/40 p-2 rounded-lg border border-gray-700 flex justify-between items-center">
-                                                    <div>
-                                                        <p className="font-bold text-white text-sm">{loc.name}</p>
-                                                        <a href={loc.mapUri} target="_blank" className="text-xs text-blue-400 hover:underline flex items-center gap-1"><MapPin size={10}/> Mapa</a>
-                                                    </div>
-                                                    <button 
-                                                        onClick={() => voteMeetupLocation(activeEvent.id, loc.id)}
-                                                        className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold ${hasVoted ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`}
-                                                    >
-                                                        <ThumbsUp size={12}/> {loc.votes.length}
-                                                    </button>
-                                                </div>
-                                            )
-                                        })}
-                                        {(!activeEvent.meetupProposal?.locations || activeEvent.meetupProposal.locations.length === 0) && (
-                                            <p className="text-center text-gray-500 text-xs italic">Aún no hay lugares propuestos.</p>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div>
-                                <div className="flex justify-between items-center mb-4"><h4 className="text-gray-300 font-bold">Contertulios (Debate Online)</h4><span className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-400">{activeEvent.committedDebaters?.length || 0}</span></div>
-                                <button onClick={() => toggleEventCommitment(activeEvent.id, 'debate')} className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${activeEvent.committedDebaters?.includes(user?.id || '') ? 'bg-cine-gold/20 text-cine-gold border border-cine-gold' : 'bg-gray-700 text-white hover:bg-white hover:text-black'}`}>
-                                    {activeEvent.committedDebaters?.includes(user?.id || '') ? <Check size={18}/> : <Hand size={18}/>} {activeEvent.committedDebaters?.includes(user?.id || '') ? 'Asistencia Confirmada' : 'Asistiré al debate online'}
+                                <button onClick={() => toggleEventCommitment(activeEvent.id, 'view')} className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${activeEvent.committedViewers?.includes(user?.id || '') ? 'bg-green-900/40 text-green-400 border border-green-600' : 'bg-gray-700 text-white hover:bg-white hover:text-black'}`}>
+                                    {activeEvent.committedViewers?.includes(user?.id || '') ? <Check size={18}/> : <Eye size={18}/>} {activeEvent.committedViewers?.includes(user?.id || '') ? 'Me he comprometido' : 'Me comprometo a verla'}
                                 </button>
                             </div>
 
+                            <div>
+                                <div className="flex justify-between items-center mb-4"><h4 className="text-gray-300 font-bold">Contertulios (Debate)</h4><span className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-400">{activeEvent.committedDebaters?.length || 0}</span></div>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    {activeEvent.committedDebaters?.map(uid => { const u = allUsers.find(user => user.id === uid); return u ? <img key={uid} src={u.avatarUrl} title={u.name} className="w-8 h-8 rounded-full border border-gray-600" /> : null; })}
+                                </div>
+                                <button onClick={() => toggleEventCommitment(activeEvent.id, 'debate')} className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${activeEvent.committedDebaters?.includes(user?.id || '') ? 'bg-cine-gold/20 text-cine-gold border border-cine-gold' : 'bg-gray-700 text-white hover:bg-white hover:text-black'}`}>
+                                    {activeEvent.committedDebaters?.includes(user?.id || '') ? <Check size={18}/> : <Hand size={18}/>} {activeEvent.committedDebaters?.includes(user?.id || '') ? 'Asistencia Confirmada' : 'Asistiré al debate'}
+                                </button>
+                            </div>
+
+                            {/* TIME VOTING SECTION */}
                             {activeEvent.committedDebaters?.includes(user?.id || '') && !activeEvent.finalDebateDate && !adminTimePreview && (
                                 <div className="mt-6 pt-6 border-t border-gray-700 animate-fade-in">
                                     <h4 className="text-cine-gold font-bold mb-3 flex items-center gap-2"><Clock size={16}/> ¿Qué horas te vienen bien?</h4>
@@ -709,6 +599,7 @@ const Events: React.FC = () => {
                     {adminDebatePreview && <div className="absolute top-16 right-0 z-[60] bg-purple-600 text-white font-bold px-4 py-1 rounded-l-lg shadow-lg">Simulación Admin</div>}
                     {adminDebatePreview && <button onClick={() => setAdminDebatePreview(false)} className="absolute top-16 left-0 z-[60] bg-white text-black font-bold px-4 py-1 rounded-r-lg shadow-lg">Salir Simulación</button>}
 
+                    {/* HEADER: AIVisualizer */}
                     <div className="bg-black/80 backdrop-blur-md p-4 border-b border-gray-800 flex items-center justify-between z-50">
                         <div className="flex items-center gap-4">
                             <div className="scale-75">
@@ -725,6 +616,7 @@ const Events: React.FC = () => {
                             </div>
                         </div>
                         
+                        {/* Audio Controls */}
                         <button 
                             onClick={() => setVoiceEnabled(!voiceEnabled)}
                             className={`p-2 rounded-full border transition-all ${voiceEnabled ? 'bg-cine-gold text-black border-cine-gold' : 'bg-transparent text-gray-500 border-gray-700'}`}
@@ -734,6 +626,7 @@ const Events: React.FC = () => {
                         </button>
                     </div>
 
+                    {/* TURN MANAGEMENT UI */}
                     <div className="bg-black/60 p-2 border-b border-gray-800 flex justify-between items-center text-xs px-4">
                         <div className="flex items-center gap-2">
                             <span className="text-gray-400">Turno actual:</span>
