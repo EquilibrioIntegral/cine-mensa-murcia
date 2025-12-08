@@ -12,6 +12,92 @@ const isAiAvailable = () => {
     return !!apiKey && apiKey.length > 0;
 };
 
+// --- TV SHOW HOST LOGIC (NEW) ---
+
+export const generateTVShowIntro = async (
+    movieTitle: string,
+    themeTitle: string,
+    director: string
+): Promise<string> => {
+    if (!isAiAvailable()) return "Bienvenidos al debate.";
+
+    const prompt = `
+        Actúa como el PRESENTADOR CARISMÁTICO del programa de televisión "Cine Mensa TV".
+        Hoy analizamos la película: "${movieTitle}" (Dirigida por ${director}).
+        Tema del ciclo: "${themeTitle}".
+
+        TU OBJETIVO: Escribir el MONÓLOGO DE APERTURA del programa.
+        
+        ESTRUCTURA OBLIGATORIA:
+        1. SALUDO: "¡Buenas noches cinéfilos! Estamos en el aire..." (Sé enérgico).
+        2. ANÉCDOTA: Cuenta una curiosidad breve, impactante o poco conocida sobre el rodaje o la producción de "${movieTitle}".
+        3. APERTURA DE LÍNEAS: Lanza una pregunta provocadora a la audiencia para que empiecen a escribir en el chat.
+        
+        TONO: Profesional, divertido, experto en cine, Showman.
+        FORMATO: Solo el texto del monólogo. Sin guion técnico.
+    `;
+
+    try {
+        const res = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        });
+        return res.text || "¡Bienvenidos al show!";
+    } catch (e) {
+        return "¡Bienvenidos a Cine Mensa TV! Hoy hablamos de " + movieTitle;
+    }
+};
+
+export const generateTVHostComment = async (
+    chatHistory: { userName: string, text: string }[],
+    movieTitle: string,
+    triggerType: 'reply' | 'silence_breaker'
+): Promise<string> => {
+    if (!isAiAvailable()) return "";
+
+    const context = chatHistory.slice(-15).map(m => `${m.userName}: ${m.text}`).join('\n');
+    
+    let specificInstruction = "";
+    if (triggerType === 'silence_breaker') {
+        specificInstruction = `
+            El chat se ha quedado en silencio (NADIE ESCRIBE). Como buen presentador, NO dejes que el ritmo caiga.
+            - Lanza un nuevo tema de debate sobre la película.
+            - O cuenta otra curiosidad rápida.
+            - O pregunta directamente a la audiencia general.
+            - Sé breve y directo. NO repitas saludos.
+        `;
+    } else {
+        specificInstruction = `
+            Un usuario acaba de hablar.
+            - Si te preguntan, responde con autoridad y carisma.
+            - Si están debatiendo, destaca el punto más interesante y añade tu toque experto.
+            - Usa el nombre del usuario para dirigirte a él ("Muy buen punto, [Nombre]...").
+            - NO saludes de nuevo si ya estamos en conversación.
+        `;
+    }
+
+    const prompt = `
+        Eres el PRESENTADOR de "Cine Mensa TV". Estamos en directo debatiendo sobre "${movieTitle}".
+        
+        HISTORIAL RECIENTE DEL CHAT:
+        ${context}
+        
+        INSTRUCCIÓN: ${specificInstruction}
+        
+        TONO: Televisivo, dinámico.
+    `;
+
+    try {
+        const res = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        });
+        return res.text || "";
+    } catch (e) {
+        return "";
+    }
+};
+
 // --- MAPS PLACE SEARCH (NEW) ---
 export const searchPlacesWithMaps = async (query: string): Promise<{ name: string, address: string, uri: string }[]> => {
     if (!isAiAvailable()) return [];
