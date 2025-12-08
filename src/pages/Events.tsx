@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { generateCineforumEvent, personalizeCandidateReason, getModeratorResponse, getWelcomeMessage, getParticipantGreeting, decideBestTime } from '../services/geminiService';
 import { getImageUrl } from '../services/tmdbService';
-import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv, Volume2, VolumeX } from 'lucide-react';
+import { Ticket, Sparkles, Calendar, Clock, Trophy, PlayCircle, MessageCircle, Send, Users, ChevronRight, Bot, Archive, UserCheck, Loader2, Mic, MicOff, Info, BrainCircuit, Eye, Check, Hand, CalendarCheck, HelpCircle, ChevronDown, ChevronUp, AlertTriangle, Phone, PhoneOff, Radio, Tv, Volume2, VolumeX, Rewind } from 'lucide-react';
 import { EventCandidate } from '../types';
 import MovieCard from '../components/MovieCard';
 import AIVisualizer from '../components/AIVisualizer';
@@ -240,9 +240,9 @@ const Events: React.FC = () => {
       try {
           const winnerTitle = activeEvent.candidates.find(c => c.tmdbId === activeEvent.winnerTmdbId)?.title || "la película";
           const welcomeText = await getWelcomeMessage(winnerTitle, activeEvent.themeTitle);
-          await transitionEventPhase(activeEvent.id, 'discussion');
+          await transitionEventPhase(activeEvent.id, 'discussion', activeEvent.winnerTmdbId);
           await sendEventMessage(activeEvent.id, welcomeText, 'moderator');
-      } catch (e) { console.error(String(e)); await transitionEventPhase(activeEvent.id, 'discussion'); } finally { setStartingDiscussion(false); }
+      } catch (e) { console.error(String(e)); await transitionEventPhase(activeEvent.id, 'discussion', activeEvent.winnerTmdbId); } finally { setStartingDiscussion(false); }
   };
 
   const handleCloseEvent = async (e: React.MouseEvent) => {
@@ -581,23 +581,44 @@ const Events: React.FC = () => {
                     </div>
 
                     {user?.isAdmin && !activeEvent.finalDebateDate && (
-                        <div className="mt-12 text-center flex flex-col gap-4 items-center">
+                        <div className="mt-12 text-center flex flex-col gap-4 items-center bg-gray-900/50 p-6 rounded-xl border border-gray-700">
+                            <h3 className="text-white font-bold text-lg mb-2">Panel de Control Admin</h3>
                             <button onClick={handleSimulateTimeDecision} disabled={simulatingTime} className="bg-purple-900/40 text-purple-300 border border-purple-500 px-6 py-3 rounded-full font-bold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
-                                {simulatingTime ? <Loader2 className="animate-spin"/> : '👁️'} Admin: Simular Decisión de Hora (Con IA)
+                                {simulatingTime ? <Loader2 className="animate-spin"/> : '👁️'} Simular Decisión de Hora (Con IA)
                             </button>
-                            <button onClick={() => setAdminDebatePreview(true)} className="bg-blue-600/40 text-blue-300 border border-blue-500 px-6 py-3 rounded-full font-bold hover:bg-blue-900 flex items-center gap-2">
-                                👁️ Admin: Simular Cineforum (Debate)
-                            </button>
+                            
+                            <div className="flex flex-col md:flex-row gap-4 mt-2">
+                                <button onClick={() => setAdminDebatePreview(true)} className="bg-blue-600/40 text-blue-300 border border-blue-500 px-6 py-3 rounded-full font-bold hover:bg-blue-900 flex items-center gap-2">
+                                    👁️ Simular Show (Pruebas)
+                                </button>
+                                
+                                <button onClick={handleStartDiscussion} disabled={startingDiscussion} className="bg-red-600 hover:bg-red-500 text-white text-lg px-8 py-3 rounded-full font-bold shadow-[0_0_30px_rgba(220,38,38,0.5)] flex items-center gap-2 animate-pulse disabled:opacity-50">
+                                    {startingDiscussion ? <Loader2 className="animate-spin"/> : <Radio size={24}/>} 
+                                    EMITIR EN DIRECTO (REAL)
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
             )}
 
             {currentPhase === 'discussion' && (
-                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full backdrop-blur-sm bg-cine-gray/95 relative">
+                <div className="flex-grow flex flex-col h-[65vh] md:h-[600px] min-h-[60dvh] bg-cine-gray rounded-xl border-4 border-gray-800 overflow-hidden shadow-2xl animate-fade-in max-w-5xl mx-auto w-full backdrop-blur-sm bg-cine-gray/95 relative">
                     
                     {adminDebatePreview && <div className="absolute top-16 right-0 z-[60] bg-purple-600 text-white font-bold px-4 py-1 rounded-l-lg shadow-lg">Simulación Admin</div>}
-                    {adminDebatePreview && <button onClick={() => setAdminDebatePreview(false)} className="absolute top-16 left-0 z-[60] bg-white text-black font-bold px-4 py-1 rounded-r-lg shadow-lg">Salir Simulación</button>}
+                    {adminDebatePreview && <button onClick={() => setAdminDebatePreview(false)} className="absolute top-16 left-0 z-[60] bg-white text-black font-bold px-4 py-1 rounded-r-lg shadow-lg hover:bg-gray-200">Salir Simulación</button>}
+
+                    {/* REVERT PHASE BUTTON (EMERGENCY ADMIN) */}
+                    {user?.isAdmin && !adminDebatePreview && (
+                        <div className="absolute top-20 left-4 z-[60]">
+                            <button 
+                                onClick={() => transitionEventPhase(activeEvent.id, 'viewing', activeEvent.winnerTmdbId)}
+                                className="bg-yellow-600/90 hover:bg-yellow-500 text-black font-bold px-4 py-2 rounded-lg shadow-[0_0_20px_rgba(234,179,8,0.4)] flex items-center gap-2 border-2 border-yellow-400 transition-all text-xs md:text-sm"
+                            >
+                                <AlertTriangle size={18} /> CORREGIR: Volver a Proyección
+                            </button>
+                        </div>
+                    )}
 
                     {/* HEADER: AIVisualizer */}
                     <div className="bg-black/80 backdrop-blur-md p-4 border-b border-gray-800 flex items-center justify-between z-50">
@@ -668,32 +689,70 @@ const Events: React.FC = () => {
                         {eventMessages.map(msg => {
                             const isMe = msg.userId === user?.id;
                             const isMod = msg.role === 'moderator';
+                            
+                            if (isMod) {
+                                return (
+                                    <div key={msg.id} className="flex justify-center my-6 animate-slide-up">
+                                        <div className="max-w-2xl w-full bg-gradient-to-r from-cine-gold/10 to-transparent border-l-4 border-cine-gold p-4 rounded-r-xl">
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <div className="w-10 h-10 rounded-full border-2 border-cine-gold bg-black flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.5)]">
+                                                    <Tv size={20} className="text-cine-gold"/>
+                                                </div>
+                                                <span className="text-cine-gold font-black uppercase tracking-wider text-sm">Presentadora</span>
+                                            </div>
+                                            <p className="text-white text-base md:text-lg leading-relaxed font-medium italic">
+                                                "{msg.text}"
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
                             return (
-                                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                        <div className="flex-shrink-0 flex flex-col items-center"><img src={msg.userAvatar} className={`w-8 h-8 rounded-full border ${isMod ? 'border-cine-gold' : 'border-gray-700'}`} alt="Avatar" />{isMod && <span className="text-[10px] text-cine-gold font-bold mt-1">HOST</span>}</div>
-                                        <div className={`p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : isMod ? 'bg-black/80 text-cine-gold border border-cine-gold rounded-tl-none shadow-[0_0_15px_rgba(212,175,55,0.15)]' : 'bg-gray-700 text-white border border-gray-600 rounded-tl-none'}`}>
-                                            {!isMe && !isMod && <p className="text-xs text-gray-400 font-bold mb-1">{msg.userName}</p>}
+                                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                                    <div className={`flex gap-3 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                                        <div className="flex-shrink-0 flex flex-col items-center">
+                                            <img src={msg.userAvatar} className="w-10 h-10 rounded-full border-2 border-gray-700" alt="Avatar" />
+                                        </div>
+                                        <div className={`p-4 rounded-2xl text-sm shadow-md ${isMe ? 'bg-blue-900/40 text-blue-100 border border-blue-800 rounded-tr-none' : 'bg-gray-800 text-gray-200 border border-gray-700 rounded-tl-none'}`}>
+                                            {!isMe && <p className="text-xs text-gray-400 font-bold mb-1 uppercase tracking-wide">{msg.userName}</p>}
                                             {msg.audioBase64 && (
                                                 <div className="flex items-center gap-2 mb-2 text-xs bg-black/20 p-1 rounded px-2 w-fit">
                                                     <Mic size={12} className="text-green-400"/> 
                                                     <span>Mensaje de voz</span>
                                                 </div>
                                             )}
-                                            <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                            <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                                         </div>
                                     </div>
                                 </div>
                             );
                         })}
-                        {modThinking && <div className="flex justify-start"><div className="flex gap-3 max-w-[85%]"><div className="w-8 h-8 rounded-full bg-cine-gray border border-cine-gold flex items-center justify-center"><Bot size={16} className="text-cine-gold" /></div><div className="bg-cine-gold/10 p-3 rounded-2xl rounded-tl-none border border-cine-gold/20 flex items-center gap-2"><span className="text-xs text-cine-gold">Escribiendo...</span></div></div></div>}
+                        
+                        {modThinking && (
+                            <div className="flex justify-center animate-pulse">
+                                <span className="text-cine-gold text-xs font-bold uppercase tracking-widest bg-black/50 px-3 py-1 rounded-full">La Presentadora está escribiendo...</span>
+                            </div>
+                        )}
                         <div ref={chatRef} />
                     </div>
-                    <div className="p-3 bg-black/80 border-t border-gray-800 flex-shrink-0">
-                        <form onSubmit={handleSendMessage} className="flex gap-2">
-                            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Escribe tu opinión... (@ia para preguntar al host)" className="flex-grow bg-gray-900 border border-gray-700 rounded-full px-4 py-3 text-white focus:border-cine-gold outline-none text-sm" />
-                            <button type="button" onClick={toggleDictation} className="p-3 text-gray-400 hover:text-white"><Mic size={20}/></button>
-                            <button type="submit" disabled={!chatInput.trim()} className="bg-cine-gold text-black p-3 rounded-full hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100"><Send size={20} /></button>
+
+                    <div className="p-4 bg-black border-t-4 border-gray-800 flex-shrink-0">
+                        <form onSubmit={handleSendMessage} className="flex gap-2 max-w-4xl mx-auto">
+                            <input 
+                                type="text" 
+                                value={chatInput} 
+                                onChange={(e) => setChatInput(e.target.value)} 
+                                placeholder="Participa en el debate..." 
+                                className="flex-grow bg-gray-900 border-2 border-gray-700 rounded-lg px-4 py-4 text-white focus:border-cine-gold outline-none text-base placeholder-gray-500 transition-colors" 
+                            />
+                            <button 
+                                type="submit" 
+                                disabled={!chatInput.trim()} 
+                                className="bg-cine-gold hover:bg-white text-black font-black px-6 rounded-lg uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:shadow-[0_0_30px_rgba(255,255,255,0.6)]"
+                            >
+                                ENVIAR
+                            </button>
                         </form>
                     </div>
                 </div>
